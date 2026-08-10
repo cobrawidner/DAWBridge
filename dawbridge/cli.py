@@ -6,20 +6,26 @@ Usage:
     dawbridge pull    --daw reaper   --folder /path/to/shared
     dawbridge push    --daw reaper   --folder /path/to/shared
     dawbridge preview --daw protools --folder /path/to/shared
-    dawbridge push    --daw protools --folder /path/to/shared --dry-run
+    dawbridge pull    --daw protools --folder /path/to/shared --dry-run
     dawbridge status  --folder /path/to/shared
     dawbridge history --folder /path/to/shared
     dawbridge restore --folder /path/to/shared --revision 7
     dawbridge doctor  --folder /path/to/shared
 
-pull:    live DAW state -> merged into the shared session.json
-push:    shared session.json -> applied into the live DAW (non-destructive)
-preview: what a push WOULD change, touching nothing (same as push --dry-run)
+pull:    shared session.json -> applied into the live DAW (non-destructive)
+push:    live DAW state -> becomes the shared session.json
+preview: what a pull WOULD change, touching nothing (same as pull --dry-run)
 status:  show what's in the shared session without touching any DAW
 history: past revisions of the shared session still kept in archive/
 restore: republish an archived revision as the current shared session
 doctor:  check the shared folder for conflicted copies, missing audio and
          overlaps - read-only, touches no DAW
+
+The names are from your point of view, not the app's: you pull the shared
+session in and push your work out, the way those words work everywhere
+else. Internally a publish still *reads* from the DAW, so `cmd_publish`
+backs the `push` command and `cmd_load` backs `pull` - named for the
+action so the mapping is stated once rather than inferred.
 """
 from __future__ import annotations
 
@@ -44,7 +50,7 @@ def _print_preview(preview, session, folder: Path, daw: str) -> None:
     if drift:
         print(f"[dawbridge] {drift}")
 
-    print(f"[dawbridge] push into {daw} would: {preview.summary_line()}")
+    print(f"[dawbridge] pulling into {daw} would: {preview.summary_line()}")
 
     if preview.track_changes:
         print("\n  tracks:")
@@ -91,7 +97,13 @@ def _get_backend(daw: str) -> Backend:
     raise SystemExit(f"Unknown --daw {daw!r}, expected 'reaper' or 'protools'")
 
 
-def cmd_pull(args: argparse.Namespace) -> int:
+def cmd_publish(args: argparse.Namespace) -> int:
+    """The `push` command: your DAW's state becomes the shared session.
+
+    Named for what it does rather than for the direction the data moves
+    inside the app - the command reads *from* the DAW, which is why this
+    used to be called `pull` and confused everyone who had ever used git.
+    """
     store = SharedStore(Path(args.folder))
     store.ensure_layout()
     backend = _get_backend(args.daw)
@@ -128,7 +140,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
         print(f"[dawbridge] publishing now would replace those changes with what's in your "
               f"{args.daw} right now.", file=sys.stderr)
         print(f"[dawbridge] there is no merge - either load theirs first "
-              f"(dawbridge push --daw {args.daw} --folder ...), or re-run with --force to "
+              f"(dawbridge pull --daw {args.daw} --folder ...), or re-run with --force to "
               f"publish yours over theirs on purpose.", file=sys.stderr)
         return 1
 
@@ -148,11 +160,11 @@ def cmd_pull(args: argparse.Namespace) -> int:
         print(f"[dawbridge] refusing to publish: {exc}", file=sys.stderr)
         print(f"[dawbridge] nothing was written - your {args.daw} is untouched and so is "
               f"the shared session.", file=sys.stderr)
-        print(f"[dawbridge] load their work first (dawbridge push --daw {args.daw} "
+        print(f"[dawbridge] load their work first (dawbridge pull --daw {args.daw} "
               f"--folder ...), or re-run with --force to publish over it.", file=sys.stderr)
         return 1
     added = len(session.tracks) - before
-    syncstate.record_sync(Path(args.folder), args.daw, session.revision, "pull", project)
+    syncstate.record_sync(Path(args.folder), args.daw, session.revision, "publish", project)
     if drift and args.force:
         print(f"[dawbridge] --force: published over a newer shared session ({drift})")
     print(f"[dawbridge] published {args.daw} -> shared session: {added} new track(s) adopted, "
@@ -178,7 +190,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_push(args: argparse.Namespace) -> int:
+def cmd_load(args: argparse.Namespace) -> int:
+    """The `pull` command: the shared session is applied into your DAW."""
     store = SharedStore(Path(args.folder))
     store.ensure_layout()
     backend = _get_backend(args.daw)
@@ -210,13 +223,13 @@ def cmd_push(args: argparse.Namespace) -> int:
         # the project already on file, and describe_project_change goes
         # quiet when there's nothing to compare against - so a single
         # no-op push would silently switch the project-swap guard off.
-        syncstate.record_sync(Path(args.folder), args.daw, session.revision, "push", project)
+        syncstate.record_sync(Path(args.folder), args.daw, session.revision, "load", project)
         return 0
 
     print()
     warnings = backend.push(session, store)
-    syncstate.record_sync(Path(args.folder), args.daw, session.revision, "push", project)
-    print(f"[dawbridge] pushed session revision {session.revision} into {args.daw}.")
+    syncstate.record_sync(Path(args.folder), args.daw, session.revision, "load", project)
+    print(f"[dawbridge] loaded session revision {session.revision} into {args.daw}.")
     for w in warnings:
         print(f"[dawbridge][warning] {w}")
     return 0
@@ -277,7 +290,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
     print(f"[dawbridge] the version this replaced is archived as r{current.revision}, "
           f"so this is undoable.")
     print("[dawbridge] this only changes the shared session - run "
-          f"`dawbridge push --daw <daw> --folder {args.folder}` to get it into a DAW.")
+          f"`dawbridge pull --daw <daw> --folder {args.folder}` to get it into a DAW.")
     return 0
 
 
@@ -365,14 +378,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dawbridge")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    for name, fn in (("pull", cmd_pull), ("push", cmd_push), ("preview", cmd_preview)):
+    # pull = bring the shared session in, push = send yours out. The words
+    # mean what they mean everywhere else; the functions are named for the
+    # action so the mapping is visible in one place rather than inferred.
+    for name, fn in (("pull", cmd_load), ("push", cmd_publish), ("preview", cmd_preview)):
         p = sub.add_parser(name)
         p.add_argument("--daw", required=True, choices=["reaper", "protools"])
         p.add_argument("--folder", required=True, help="Path to the shared network folder")
-        if name == "push":
+        if name == "pull":
             p.add_argument("--dry-run", action="store_true",
                            help="show what would change, then stop without touching the DAW")
-        if name == "pull":
+        if name == "push":
             p.add_argument("--force", action="store_true",
                            help="publish even though someone else published since you last synced, "
                                 "replacing their changes")

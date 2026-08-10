@@ -150,12 +150,14 @@ class DawBridgeGUI(ttk.Frame):
 
         button_frame = ttk.Frame(body, style="Chassis.TFrame")
         button_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(14, 0))
-        self.pull_btn = ttk.Button(button_frame, text="Pull from DAW", command=self._on_pull)
-        self.pull_btn.pack(side="left")
-        self.preview_btn = ttk.Button(button_frame, text="Preview push", command=self._on_preview)
-        self.preview_btn.pack(side="left", padx=(8, 0))
-        self.push_btn = ttk.Button(button_frame, text="Push to DAW", command=self._on_push)
-        self.push_btn.pack(side="left", padx=(8, 0))
+        # Left to right is the order you actually work in: look at what's
+        # waiting, take it, then send yours back.
+        self.preview_btn = ttk.Button(button_frame, text="Preview pull", command=self._on_preview)
+        self.preview_btn.pack(side="left")
+        self.load_btn = ttk.Button(button_frame, text="Pull from Bridge", command=self._on_load)
+        self.load_btn.pack(side="left", padx=(8, 0))
+        self.publish_btn = ttk.Button(button_frame, text="Push to Bridge", command=self._on_publish)
+        self.publish_btn.pack(side="left", padx=(8, 0))
         # The groove marks the divide: everything left of it changes
         # something, everything right of it only looks.
         theme.separator(button_frame, orient="vertical").pack(side="left", fill="y", padx=14)
@@ -255,9 +257,9 @@ class DawBridgeGUI(ttk.Frame):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         state = "disabled" if busy else "normal"
-        self.pull_btn.configure(state=state)
         self.preview_btn.configure(state=state)
-        self.push_btn.configure(state=state)
+        self.load_btn.configure(state=state)
+        self.publish_btn.configure(state=state)
         self.refresh_btn.configure(state=state)
 
         colour = theme.READOUT_WARN if busy else theme.READOUT_GOOD
@@ -313,14 +315,14 @@ class DawBridgeGUI(ttk.Frame):
 
         _save_config({"folder": str(folder), "daw": self.daw_var.get()})
 
-    def _on_pull(self) -> None:
-        self._run_async(self._do_pull)
+    def _on_publish(self) -> None:
+        self._run_async(self._do_publish)
 
     def _on_preview(self) -> None:
         self._run_async(self._do_preview)
 
-    def _on_push(self) -> None:
-        self._run_async(self._do_push)
+    def _on_load(self) -> None:
+        self._run_async(self._do_load)
 
     def _describe_preview(self, preview, session, folder: Path, daw: str) -> list[str]:
         """The preview as log lines - same content the CLI prints."""
@@ -330,7 +332,7 @@ class DawBridgeGUI(ttk.Frame):
         drift = syncstate.describe_drift(folder, daw, session.revision)
         if drift:
             lines.append(f"[preview] {drift}")
-        lines.append(f"[preview] pushing to {daw} would: {preview.summary_line()}")
+        lines.append(f"[preview] pulling into {daw} would: {preview.summary_line()}")
 
         for tc in preview.track_changes:
             label = {"create": "CREATE", "rename": "RENAME", "mute": "MUTE", "unmute": "UNMUTE"}[tc.kind]
@@ -392,7 +394,8 @@ class DawBridgeGUI(ttk.Frame):
             self.master.after(0, lambda: self._set_busy(False))
             self.master.after(0, self._refresh_status)
 
-    def _do_pull(self, folder: Path) -> None:
+    def _do_publish(self, folder: Path) -> None:
+        """The "Push to Bridge" button: this DAW becomes the shared session."""
         daw = self.daw_var.get()
         store = SharedStore(folder)
         store.ensure_layout()
@@ -417,13 +420,13 @@ class DawBridgeGUI(ttk.Frame):
         project = backend.project_identity()
         project_change = syncstate.describe_project_change(folder, daw, project)
         if project_change:
-            self.master.after(0, lambda: self._log(f"[pull][warning] {project_change}"))
+            self.master.after(0, lambda: self._log(f"[push][warning] {project_change}"))
             if not self._ask_confirm_on_main_thread_generic(
                 "DAWBridge - different project open",
                 f"{project_change}.\n\nPublishing replaces the shared session with "
                 f"THIS project's contents.\n\nPublish anyway?",
             ):
-                self.master.after(0, lambda: self._log("[pull] cancelled - shared session untouched."))
+                self.master.after(0, lambda: self._log("[push] cancelled - shared session untouched."))
                 return
 
         # Two: someone else published since this machine last synced, and
@@ -435,13 +438,13 @@ class DawBridgeGUI(ttk.Frame):
         # never-synced machines protected nobody.
         drift = syncstate.describe_drift(folder, daw, session.revision)
         if drift and (syncstate.last_synced(folder, daw) is not None or session.revision > 0):
-            self.master.after(0, lambda: self._log(f"[pull][warning] {drift}"))
+            self.master.after(0, lambda: self._log(f"[push][warning] {drift}"))
             if not self._ask_confirm_on_main_thread_generic(
                 "DAWBridge - someone else published",
                 f"{drift}.\n\nPublishing now replaces their changes with what's in your "
                 f"{daw} right now. There is no merge.\n\nPublish anyway?",
             ):
-                self.master.after(0, lambda: self._log("[pull] cancelled - shared session untouched."))
+                self.master.after(0, lambda: self._log("[push] cancelled - shared session untouched."))
                 return
 
         before = len(session.tracks)
@@ -457,27 +460,28 @@ class DawBridgeGUI(ttk.Frame):
         try:
             store.save(session, updated_by=f"gui@{daw}", expected_revision=loaded_revision)
         except SharedSessionMoved as exc:
-            self.master.after(0, lambda: self._log(f"[pull][error] {exc}"))
+            self.master.after(0, lambda: self._log(f"[push][error] {exc}"))
             self.master.after(0, lambda: self._log(
-                "[pull] nothing was written - your DAW and the shared session are both untouched."))
+                "[push] nothing was written - your DAW and the shared session are both untouched."))
             self.master.after(0, lambda: messagebox.showwarning(
                 "DAWBridge - someone published just now",
                 f"{exc}.\n\nNothing was written. Load their changes first "
-                f"(Push to DAW), then publish again."))
+                f"(Pull from Bridge), then publish again."))
             return
-        syncstate.record_sync(folder, daw, session.revision, "pull", project)
+        syncstate.record_sync(folder, daw, session.revision, "publish", project)
         added = len(session.tracks) - before
         self.master.after(
             0,
             lambda: self._log(
-                f"[pull] pulled from {daw}: {added} new track(s) adopted, "
+                f"[push] published {daw} -> shared session: {added} new track(s) adopted, "
                 f"{len(session.tracks)} total. Revision {session.revision}."
             ),
         )
         for w in pull_warnings:
             self.master.after(0, lambda w=w: self._log(f"[pull][warning] {w}"))
 
-    def _do_push(self, folder: Path) -> None:
+    def _do_load(self, folder: Path) -> None:
+        """The "Pull from Bridge" button: the shared session lands in this DAW."""
         daw = self.daw_var.get()
         store = SharedStore(folder)
         store.ensure_layout()
@@ -485,7 +489,7 @@ class DawBridgeGUI(ttk.Frame):
 
         if not backend.is_available():
             self.master.after(
-                0, lambda: self._log(f"[push] {daw} doesn't look reachable - is it open and scripting enabled?")
+                0, lambda: self._log(f"[pull] {daw} doesn't look reachable - is it open and scripting enabled?")
             )
             return
 
@@ -500,23 +504,23 @@ class DawBridgeGUI(ttk.Frame):
             self.master.after(0, lambda line=line: self._log(line))
 
         if preview.is_empty:
-            self.master.after(0, lambda: self._log("[push] nothing to do - DAW already matches."))
+            self.master.after(0, lambda: self._log("[pull] nothing to do - DAW already matches."))
             # Record the project too: writing the breadcrumb without it used
             # to erase the project on file, and describe_project_change goes
             # quiet with nothing to compare against - so a single no-op push
             # switched the project-swap guard off for good.
-            syncstate.record_sync(folder, daw, session.revision, "push", project)
+            syncstate.record_sync(folder, daw, session.revision, "load", project)
             return
 
         if not self._ask_confirm_on_main_thread(preview, daw):
-            self.master.after(0, lambda: self._log("[push] cancelled - nothing was changed."))
+            self.master.after(0, lambda: self._log("[pull] cancelled - nothing was changed."))
             return
 
         warnings = backend.push(session, store)
-        syncstate.record_sync(folder, daw, session.revision, "push", project)
-        self.master.after(0, lambda: self._log(f"[push] pushed session revision {session.revision} into {daw}."))
+        syncstate.record_sync(folder, daw, session.revision, "load", project)
+        self.master.after(0, lambda: self._log(f"[pull] loaded session revision {session.revision} into {daw}."))
         for w in warnings:
-            self.master.after(0, lambda w=w: self._log(f"[push][warning] {w}"))
+            self.master.after(0, lambda w=w: self._log(f"[pull][warning] {w}"))
 
     def _ask_confirm_on_main_thread(self, preview, daw: str) -> bool:
         """Ask for confirmation from a worker thread, safely.
@@ -551,11 +555,11 @@ class DawBridgeGUI(ttk.Frame):
 
     def _confirm_push(self, preview, daw: str) -> bool:
         """Runs on the Tk main thread (see _ask_confirm_on_main_thread)."""
-        body = [f"Push into {daw} will:", "", preview.summary_line()]
+        body = [f"Pulling into {daw} will:", "", preview.summary_line()]
         if preview.warnings:
             body += ["", f"{len(preview.warnings)} warning(s) - see the log for details."]
         body += ["", "Full details are in the log. Go ahead?"]
-        return messagebox.askyesno("DAWBridge - confirm push", "\n".join(body))
+        return messagebox.askyesno("DAWBridge - confirm pull", "\n".join(body))
 
 
 def main() -> int:

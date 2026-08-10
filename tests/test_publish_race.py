@@ -76,15 +76,15 @@ def _setup(tmp_path, monkeypatch):
     seed.tracks = [Track.new(name="Shared")]
     store.save(seed, updated_by="partner@protools")
     monkeypatch.setattr(syncstate, "_STATE_PATH", tmp_path / "state.json")
-    syncstate.record_sync(folder, "reaper", store.load().revision, "pull", r"C:\p\Song.rpp")
+    syncstate.record_sync(folder, "reaper", store.load().revision, "publish", r"C:\p\Song.rpp")
     monkeypatch.setattr("dawbridge.cli._get_backend", lambda daw: _SlowBackend(store))
     return folder, store
 
 
-def test_cli_pull_refuses_a_publish_that_raced(tmp_path, monkeypatch, capsys):
+def test_cli_publish_refuses_a_publish_that_raced(tmp_path, monkeypatch, capsys):
     folder, store = _setup(tmp_path, monkeypatch)
 
-    code = main(["pull", "--daw", "reaper", "--folder", str(folder)])
+    code = main(["push", "--daw", "reaper", "--folder", str(folder)])
 
     assert code == 1
     err = capsys.readouterr().err
@@ -95,5 +95,5 @@ def test_cli_pull_refuses_a_publish_that_raced(tmp_path, monkeypatch, capsys):
 def test_force_publishes_over_a_race_on_purpose(tmp_path, monkeypatch):
     folder, store = _setup(tmp_path, monkeypatch)
 
-    assert main(["pull", "--daw", "reaper", "--folder", str(folder), "--force"]) == 0
+    assert main(["push", "--daw", "reaper", "--folder", str(folder), "--force"]) == 0
     assert [t.name for t in store.load().tracks] == ["Mine"]

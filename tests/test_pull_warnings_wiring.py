@@ -31,13 +31,13 @@ class _NoisyBackend:
         return []
 
 
-def test_cli_pull_prints_what_the_backend_noticed(tmp_path, monkeypatch, capsys):
+def test_cli_publish_prints_what_the_backend_noticed(tmp_path, monkeypatch, capsys):
     folder = tmp_path / "shared"
     SharedStore(folder).ensure_layout()
     monkeypatch.setattr(syncstate, "_STATE_PATH", tmp_path / "state.json")
     monkeypatch.setattr("dawbridge.cli._get_backend", lambda daw: _NoisyBackend())
 
-    assert main(["pull", "--daw", "reaper", "--folder", str(folder)]) == 0
+    assert main(["push", "--daw", "reaper", "--folder", str(folder)]) == 0
 
     out = capsys.readouterr().out
     assert "publishing removes 'Harmony Vox'" in out
@@ -56,7 +56,7 @@ def test_a_backend_that_ignores_the_list_still_works(tmp_path, monkeypatch, caps
     monkeypatch.setattr(syncstate, "_STATE_PATH", tmp_path / "state.json")
     monkeypatch.setattr("dawbridge.cli._get_backend", lambda daw: _Old())
 
-    assert main(["pull", "--daw", "reaper", "--folder", str(folder)]) == 0
+    assert main(["push", "--daw", "reaper", "--folder", str(folder)]) == 0
     assert "[dawbridge][warning]" not in capsys.readouterr().out
 
 

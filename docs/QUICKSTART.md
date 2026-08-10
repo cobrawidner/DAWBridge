@@ -25,17 +25,19 @@ put there.
 
 ## The two buttons
 
-The names describe what DAWBridge does *to your DAW*. If you've used GitHub,
-ignore what "pull" and "push" mean there — it's the opposite.
+"The Bridge" is the shared folder. You pull work in from it and push your work
+out to it — the same way those words work in any other tool.
 
-| Button | What it actually does |
+| Button | What it does |
 |---|---|
-| **Push to DAW** | Takes the shared version and **puts it into your DAW**. This is how you get your collaborator's work. Do this first, every time. |
-| **Pull from DAW** | Takes what's in **your DAW** and makes it the shared version. This is how you publish. Do this when you're done. |
-| **Preview push** | Shows you exactly what "Push to DAW" would change, and changes nothing. Free to click. |
-| **Refresh status** | Re-reads the shared folder. Shows what's there right now. |
+| **Pull from Bridge** | Brings the shared version **into your DAW**. This is how you get your collaborator's work. Do this first, every time. |
+| **Push to Bridge** | Sends what's in **your DAW** out to the shared folder. This is how you publish. Do this when you're done. |
+| **Preview pull** | Shows exactly what "Pull from Bridge" would change, and changes nothing. Free to click. |
+| **Refresh status** | Re-reads the shared folder and shows what's there right now. |
 
-If you remember nothing else: **Push to DAW = get theirs. Pull from DAW = send yours.**
+If you remember nothing else: **pull to get theirs, push to send yours.**
+
+The buttons sit left to right in the order you use them.
 
 ---
 
@@ -57,15 +59,20 @@ It remembers both next time.
 
 ## The normal working session
 
-1. **Push to DAW** — pulls in whatever your collaborator published.
-2. Read the log. It tells you what changed.
-3. **Work in your DAW as normal.** DAWBridge isn't running anything while you
+1. **Preview pull**, if you want to see what's waiting before you take it.
+   This changes nothing.
+2. **Pull from Bridge** — brings in whatever your collaborator published.
+3. Read the log. It tells you what changed.
+4. **Work in your DAW as normal.** DAWBridge isn't running anything while you
    work.
-4. **Save your project in your DAW.** DAWBridge reads what your DAW currently
+5. **Save your project in your DAW.** DAWBridge reads what your DAW currently
    has; unsaved work is a grey area, so save first.
-5. **Preview push**, if you want to see what will be published.
-6. **Pull from DAW** — publishes your version.
+6. **Push to Bridge** — publishes your version.
 7. Wait for Dropbox to finish syncing before you close the laptop.
+
+There's no preview of a publish — the preview only shows what a *pull* would
+change in your DAW. Before publishing, the thing to check is that you pulled
+first.
 
 Tell your collaborator when you've published. DAWBridge will *catch* the case
 where you both publish at once, but a message is faster than a warning.
@@ -80,8 +87,8 @@ is at risk.
 **"someone else has published since your last sync"**
 Your collaborator published while you were working. If you continue, your
 version replaces theirs and theirs is gone from the shared folder. What you
-almost always want instead: cancel, click **Push to DAW** to load their work,
-check your own changes are still there, then publish.
+almost always want instead: cancel, click **Pull from Bridge** to load their
+work, check your own changes are still there, then publish.
 
 **"this DAW has a different project open than your last sync"**
 You have a different song open than last time. Publishing would replace the
@@ -151,8 +158,9 @@ Being upfront so nothing surprises you mid-session:
   the meter yourself on the receiving side — the tempo does cross.
 - **Fades** cross from the shared folder into your DAW, but aren't read back
   out. A crossfade you create may not survive being published.
-- **In Pro Tools**, clips that already exist aren't moved by a push. New clips
-  arrive correctly; if the preview says a clip moved and it didn't, that's this.
+- **In Pro Tools**, clips that already exist aren't moved when you pull. New
+  clips arrive correctly; if the preview says a clip moved and it didn't,
+  that's this.
 - **Anything DAWBridge doesn't know about** — plugins, automation, mixer
   settings, routing — stays entirely on your machine. This syncs the
   arrangement: tracks, clips, positions and audio.

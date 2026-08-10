@@ -2,7 +2,7 @@
 
 Handing the .exe to a collaborator creates exactly the state both front
 ends used to wave through: a machine with no sync history, pointed at a
-folder that already holds someone's real work. One click of Pull replaced
+folder that already holds someone's real work. One click of Push replaced
 all of it. The guard existed and was explicitly suppressed for this case.
 """
 from pathlib import Path
@@ -48,20 +48,20 @@ def _populated(folder: Path) -> SharedStore:
     return store
 
 
-def test_first_ever_pull_onto_real_work_is_refused(tmp_path, monkeypatch, capsys):
+def test_first_ever_publish_onto_real_work_is_refused(tmp_path, monkeypatch, capsys):
     folder = tmp_path / "shared"
     store = _populated(folder)
     monkeypatch.setattr("dawbridge.cli._get_backend", lambda daw: _Backend())
     monkeypatch.setattr(syncstate, "_STATE_PATH", tmp_path / "state.json")
 
-    code = main(["pull", "--daw", "reaper", "--folder", str(folder)])
+    code = main(["push", "--daw", "reaper", "--folder", str(folder)])
 
     assert code == 1, "a fresh install must not silently replace existing work"
     assert "refusing to publish" in capsys.readouterr().err
     assert len(store.load().tracks) == 6, "the partner's tracks must still be there"
 
 
-def test_first_ever_pull_onto_an_empty_folder_is_allowed(tmp_path, monkeypatch):
+def test_first_ever_publish_onto_an_empty_folder_is_allowed(tmp_path, monkeypatch):
     # The genuinely new shared folder - nothing to lose, so nothing to ask.
     folder = tmp_path / "shared"
     store = SharedStore(folder)
@@ -69,7 +69,7 @@ def test_first_ever_pull_onto_an_empty_folder_is_allowed(tmp_path, monkeypatch):
     monkeypatch.setattr("dawbridge.cli._get_backend", lambda daw: _Backend())
     monkeypatch.setattr(syncstate, "_STATE_PATH", tmp_path / "state.json")
 
-    assert main(["pull", "--daw", "reaper", "--folder", str(folder)]) == 0
+    assert main(["push", "--daw", "reaper", "--folder", str(folder)]) == 0
     assert [t.name for t in store.load().tracks] == ["Audio 1"]
 
 
@@ -79,17 +79,17 @@ def test_force_still_publishes_over_real_work(tmp_path, monkeypatch):
     monkeypatch.setattr("dawbridge.cli._get_backend", lambda daw: _Backend())
     monkeypatch.setattr(syncstate, "_STATE_PATH", tmp_path / "state.json")
 
-    assert main(["pull", "--daw", "reaper", "--folder", str(folder), "--force"]) == 0
+    assert main(["push", "--daw", "reaper", "--folder", str(folder), "--force"]) == 0
     assert [t.name for t in store.load().tracks] == ["Audio 1"]
 
 
-def test_pull_records_the_project_so_the_swap_guard_can_work(tmp_path, monkeypatch):
+def test_publish_records_the_project_so_the_swap_guard_can_work(tmp_path, monkeypatch):
     folder = tmp_path / "shared"
     SharedStore(folder).ensure_layout()
     monkeypatch.setattr("dawbridge.cli._get_backend", lambda daw: _Backend())
     monkeypatch.setattr(syncstate, "_STATE_PATH", tmp_path / "state.json")
 
-    main(["pull", "--daw", "reaper", "--folder", str(folder)])
+    main(["push", "--daw", "reaper", "--folder", str(folder)])
 
     assert syncstate.last_synced(folder, "reaper")["project"] == r"C:\new\Untitled.rpp"
     assert syncstate.describe_project_change(folder, "reaper", r"C:\other\Song.rpp")
