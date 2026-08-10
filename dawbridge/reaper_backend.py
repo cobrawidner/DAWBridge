@@ -1,14 +1,44 @@
 """Reaper-side backend, driving a *running* Reaper instance live via
 python-reapy (https://python-reapy.readthedocs.io/).
 
-NOT TESTED against a real Reaper instance - there's no Reaper available in
-the sandbox this was written in. The ReaScript function names used below
-(RPR_* calls, accessed through reapy.reascript_api) are long-stable parts
-of the ReaScript API and are used here in their well-documented forms, but
-reapy's exact argument conventions for buffer-style get/set calls can
-differ slightly by reapy version. Treat this file as a strong starting
-point to run and adjust against your actual installed reapy, not as
-guaranteed-correct on the first try.
+Validated against a real, running Reaper 7.69 driven through reapy's
+remote API. Things that had been guessed here for a long time, and what
+checking them actually showed:
+
+  - **SetCurrentBPM is destructive.** It does not just change a number,
+    it drags every beat-attached item, fade and marker to a new position.
+    Measured: an item at 5.333s with a 0.333s fade became 4.000s / 0.250s
+    when the tempo went 90 -> 120, and back on the way down - position,
+    length and fades all scale by the tempo ratio. Canonical stores
+    SECONDS, so pushing a tempo silently relocated whatever was already
+    in the project and then placed the pushed clips at canonical's own
+    positions, leaving the arrangement wrong against itself and
+    publishing the damage on the next pull. The tempo is now only
+    written into a project with no items in it (see sync.tempo_write_is_safe).
+  - `SetTempoTimeSigMarker` DOES work - 4/4 @120 became 6/8 @90 - so the
+    time signature is writable in principle. It is still not written,
+    because it moves everything for exactly the same reason.
+  - **String out-parameters do not survive reapy's remote API** unless
+    the call takes an explicit buffer SIZE. `GetMediaSourceFileName(src,
+    "", 4096)` works; `EnumProjectMarkers2`'s name field never gets
+    filled in - it echoes back whatever buffer was passed, for
+    EnumProjectMarkers/2/3 alike, and inside an inside_reaper() block
+    too. reapy's own Marker class has no name property either. That is
+    why marker names are read from the saved .rpp - see
+    _parse_rpp_markers.
+  - `EnumProjectMarkers2` returns 8 elements: (retval, proj, idx, isrgn,
+    pos, rgnend, name, markrgnindexnumber). `CountProjectMarkers` returns
+    (retval, proj, n_markers, n_regions). Both layouts _decode_marker_row
+    knows about are kept, but this is the one that's real here.
+  - Fades round-trip exactly: written 0.25/0.5, read back 0.25/0.5.
+  - Markers are beat-attached, so a tempo change moves them too (12.5s
+    became 16.667s on a 120 -> 90 change).
+
+Still unverified: nothing in the clip push/pull path has been exercised
+end to end against Reaper - only the marker, fade and tempo paths above.
+The RPR_* calls elsewhere are long-stable parts of the ReaScript API used
+in their documented forms, but reapy's argument conventions differ by
+version, so treat those as strong rather than proven.
 
 One-time setup (see README):
     pip install python-reapy
@@ -17,6 +47,7 @@ One-time setup (see README):
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .backend import Backend, LiveClip, LiveMarker, LiveTrack
@@ -72,6 +103,59 @@ def _decode_marker_row(row) -> tuple[bool, float, str, int] | None:
             except (TypeError, ValueError):
                 continue
     return None
+
+
+#: One MARKER line from a saved .rpp:
+#:     MARKER 1 16.66666666666667 "Verse #22222222" 0 0 1 R {GUID} 0 2
+#: index, position, name, then the region flag. Reaper quotes a name with
+#: whichever of " ' ` doesn't appear inside it.
+_RPP_MARKER_RE = re.compile(
+    r"""^MARKER \s+ (?P<index>\d+) \s+ (?P<position>[-+0-9.eE]+) \s+
+        (?: "(?P<dq>[^"]*)" | '(?P<sq>[^']*)' | `(?P<bq>[^`]*)` | (?P<bare>\S+) )
+        (?: \s+ (?P<isrgn>\d+) )? """,
+    re.VERBOSE,
+)
+
+
+def _parse_rpp_markers(text: str) -> list[dict] | None:
+    """Marker index/position/name from a saved Reaper project file, or
+    None if this isn't a Reaper project at all.
+
+    reapy cannot return a marker's name - the string out-parameter of
+    EnumProjectMarkers2 is never populated over its remote API (confirmed
+    live, and reapy's own Marker class has no name property either). The
+    name carries the bridge tag, so without it there is no identity and
+    every pull would hand the partner a fresh duplicate set.
+
+    Reading it from the serialised project is the same move
+    `_pull_clips_via_text_export` already makes on the Pro Tools side,
+    for the same class of reason: the live API physically cannot answer
+    and the serialised form can. Deliberately narrow - markers only.
+    Positions, indices and everything else still come from the live API.
+
+    Regions are excluded here as everywhere else: they carry isrgn=1 (as
+    does the second line that marks a region's end) and the schema has
+    nowhere to keep a region's end.
+    """
+    if "<REAPER_PROJECT" not in text:
+        return None
+
+    rows = []
+    for line in text.splitlines():
+        match = _RPP_MARKER_RE.match(line.strip())
+        if not match:
+            continue
+        if (match.group("isrgn") or "0") != "0":
+            continue
+        name = next(
+            (match.group(g) for g in ("dq", "sq", "bq", "bare") if match.group(g) is not None), ""
+        )
+        try:
+            position = float(match.group("position"))
+        except ValueError:
+            continue
+        rows.append({"index": int(match.group("index")), "position": position, "name": name})
+    return rows
 
 
 def _import_audio(store, source_path: str, warnings=None, clip_name: str = "", track_name: str = "") -> str:
@@ -175,7 +259,8 @@ class ReaperBackend(Backend):
     # ---- markers -------------------------------------------------------
 
     def read_live_markers(
-        self, warnings: list[str] | None = None, for_publish: bool = False
+        self, warnings: list[str] | None = None, for_publish: bool = False,
+        save_first: bool = False,
     ) -> list[LiveMarker] | None:
         """Project markers, tagged and untagged, or None when their names
         can't be read at all (see the check at the end of this method). Regions are deliberately
@@ -200,41 +285,37 @@ class ReaperBackend(Backend):
             if decoded is None:
                 unreadable += 1
                 continue
-            is_region, position, raw_name, marker_index = decoded
+            is_region, position, _unusable_name, marker_index = decoded
             if is_region:
                 regions += 1
                 continue
-            base_name, bridge_id = parse_tag(raw_name)
+            # The name from this call is always empty - see below. Carry
+            # the position and index, which ARE reliable, and get the name
+            # from the saved project.
             markers.append(
-                LiveMarker(bridge_id=bridge_id, name=base_name,
+                LiveMarker(bridge_id=None, name="",
                            time_seconds=position, native=marker_index)
             )
 
         # CONFIRMED BY LIVE TEST against Reaper 7.69 + reapy: the name
         # out-parameter of EnumProjectMarkers2 is never populated over
-        # reapy's distant API - it echoes back whatever buffer was passed
+        # reapy's remote API - it echoes back whatever buffer was passed
         # ('' stays '', 4096 spaces stay 4096 spaces), for EnumProjectMarkers,
         # EnumProjectMarkers2 and EnumProjectMarkers3 alike, and inside an
         # inside_reaper() block too. Numeric out-params are fine; string
         # ones only work where the call takes an explicit buffer SIZE
-        # (GetMediaSourceFileName does, these don't).
+        # (GetMediaSourceFileName does, these don't). reapy's own Marker
+        # class has no name property either, so there is no higher-level
+        # route.
         #
-        # Identity lives in the name, so an empty name means no bridge
-        # tag, which means every pull would adopt every marker afresh,
-        # mint a new id and hand the partner a duplicate set on every
-        # single sync - the -01/-02/-03 failure, in markers. Returning
-        # None ("can't read markers") instead of a list of nameless ones
-        # keeps that damage from ever starting.
-        if markers and all(not m.name for m in markers):
-            if warnings is not None:
-                warnings.append(
-                    f"Reaper reported {len(markers)} marker(s) but no names, which is a known "
-                    f"limitation of reapy's remote API - it never fills in the name field. "
-                    f"Without names DAWBridge cannot tell markers apart, so markers were skipped "
-                    f"entirely rather than published as duplicates. Tracks and clips are "
-                    f"unaffected"
-                )
-            return None
+        # Identity lives in the name, so the names come from the saved
+        # project file instead - same move _pull_clips_via_text_export
+        # makes on the Pro Tools side, for the same reason.
+        if markers:
+            named = self._name_markers_from_project(markers, warnings, save_first)
+            if named is None:
+                return None
+            markers = named
 
         if warnings is not None and for_publish and regions:
             warnings.append(
@@ -251,6 +332,90 @@ class ReaperBackend(Backend):
             )
         return markers
 
+    #: Live position vs the position in the saved file. They come from the
+    #: same numbers, so anything above float noise means the file does not
+    #: describe what's on screen.
+    _MARKER_POSITION_TOLERANCE = 0.001
+
+    def _name_markers_from_project(
+        self, markers: list[LiveMarker], warnings: list[str] | None, save_first: bool
+    ) -> list[LiveMarker] | None:
+        """Fill in marker names (and so bridge tags) from the saved .rpp.
+
+        Returns None - "markers can't be read" - rather than guessing,
+        whenever the file can't be trusted to describe the live state. A
+        stale name is worse than an admitted absence: a stale bridge tag
+        duplicates, and duplication is the failure this whole approach
+        exists to prevent.
+        """
+        import reapy
+        from reapy import reascript_api as RPR
+
+        def _give_up(reason: str) -> None:
+            if warnings is not None:
+                warnings.append(
+                    f"markers were skipped: {reason}. DAWBridge reads marker names from the saved "
+                    f"project file, because Reaper's scripting bridge cannot report them, and "
+                    f"without names it cannot tell markers apart. Tracks and clips are unaffected"
+                )
+            return None
+
+        try:
+            project_path = RPR.EnumProjects(-1, "", 4096)[2] or ""
+        except Exception as exc:
+            return _give_up(f"Reaper would not say which project is open ({exc})")
+        if not project_path:
+            return _give_up("this project has never been saved, so there is no file to read")
+
+        if save_first:
+            # pull and push both save the project anyway; doing it here
+            # first is what makes the file current enough to trust.
+            try:
+                reapy.Project().save()
+            except Exception as exc:
+                return _give_up(f"the project could not be saved ({exc})")
+        else:
+            # A preview must not write to anything, so it can only read a
+            # file that is already current.
+            try:
+                if RPR.IsProjectDirty(0):
+                    return _give_up("the project has unsaved changes, so its file is out of date")
+            except Exception:
+                pass
+
+        try:
+            text = Path(project_path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return _give_up(f"the project file could not be read ({exc})")
+
+        rows = _parse_rpp_markers(text)
+        if rows is None:
+            return _give_up(f"{Path(project_path).name!r} is not a readable Reaper project file")
+
+        by_index = {row["index"]: row for row in rows}
+        named: list[LiveMarker] = []
+        for marker in markers:
+            row = by_index.get(marker.native)
+            if row is None:
+                return _give_up(
+                    f"marker {marker.native} is in Reaper but not in the saved file, so the file "
+                    f"is out of date"
+                )
+            # Cross-check the one field both sources report. Disagreement
+            # means the file describes a different state than the one on
+            # screen, and the names in it cannot be trusted either.
+            if abs(row["position"] - marker.time_seconds) > self._MARKER_POSITION_TOLERANCE:
+                return _give_up(
+                    f"marker {marker.native} is at {marker.time_seconds:.3f}s in Reaper but "
+                    f"{row['position']:.3f}s in the saved file, so the file is out of date"
+                )
+            base_name, bridge_id = parse_tag(row["name"])
+            named.append(
+                LiveMarker(bridge_id=bridge_id, name=base_name,
+                           time_seconds=marker.time_seconds, native=marker.native)
+            )
+        return named
+
     def _pull_markers(self, session: Session, warnings: list[str]) -> None:
         """Replace canonical's marker list with what's in Reaper now.
 
@@ -264,7 +429,7 @@ class ReaperBackend(Backend):
         pulled: list[Marker] = []
         claimed: set[str] = set()
 
-        observed = self.read_live_markers(warnings, for_publish=True)
+        observed = self.read_live_markers(warnings, for_publish=True, save_first=True)
         if observed is None:
             return  # names unreadable - see read_live_markers
         for live in observed:
@@ -304,7 +469,7 @@ class ReaperBackend(Backend):
         """Apply canonical's markers into Reaper. Never deletes."""
         from reapy import reascript_api as RPR
 
-        live = self.read_live_markers(warnings)
+        live = self.read_live_markers(warnings, save_first=True)
         if live is None:
             return  # names unreadable - see read_live_markers
         live_by_id = {m.bridge_id: m for m in live if m.bridge_id}
