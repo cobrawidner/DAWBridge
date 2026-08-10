@@ -186,6 +186,91 @@ def test_track_order_follows_pro_tools(store):
     assert [(t.name, t.order) for t in session.tracks] == [("Vox", 0), ("Kick", 1), ("Bass", 2)]
 
 
+def test_adopting_a_clip_never_renames_the_file_on_disk(store):
+    """Confirmed live against Pro Tools 2025, and it was really happening.
+
+    `rename_target_clip` defaults to `rename_file=True`, which renames AND
+    REWRITES the underlying audio file on disk. The push path was fixed
+    for this once - the module docstring records it silently renaming and
+    rewriting a real shared audio file - but the pull path was never
+    given the same treatment and had been carrying it ever since.
+
+    Measured in a live scratch session: after one pull, Pro Tools' Audio
+    Files folder held "stereo_probe #fd13bc6f.wav" instead of
+    "stereo_probe.wav", and the file had grown from 864044 to 870160
+    bytes. It wasn't just renamed, it was rewritten.
+
+    This matters well beyond a tidy filename: Pro Tools' AddAudio imports
+    BY REFERENCE, so a session can legitimately reference audio that
+    lives anywhere - a sample library, or the shared Dropbox folder. A
+    pull would rename and rewrite whatever it found there.
+    """
+    calls = []
+
+    class _RecordingEngine(_Engine):
+        def rename_target_clip(self, clip_name, new_name, rename_file=True):
+            calls.append({"clip_name": clip_name, "new_name": new_name, "rename_file": rename_file})
+
+    engine = _RecordingEngine(
+        [_NativeTrack("Gtr #aaaaaaaa")],
+        _export(("Gtr #aaaaaaaa", [("stereo_probe", 0, 48000)])),
+    )
+
+    ProToolsBackend()._pull(engine, Session(), store)
+
+    assert calls, "the clip should have been adopted"
+    assert calls[0]["rename_file"] is False, (
+        "adopting a clip must never touch the audio file on disk"
+    )
+
+
+def test_one_clip_that_cannot_be_tagged_does_not_abort_the_publish(store):
+    """Found by live test against Pro Tools 2025.
+
+    Adopting an untagged clip renames it to carry the bridge id, and that
+    rename was unguarded. A real session threw
+    `PT_InvalidParameter (Can't found clip: stereo_probe)` - Pro Tools
+    would not rename a clip whose name was ambiguous on the timeline -
+    and the exception came straight out of pull(), so the ENTIRE publish
+    died and nothing was written. push() had this exact failure fixed
+    once ("one bad clip aborting an entire push"); the pull side never
+    got the same treatment.
+    """
+    class _RefusingEngine(_Engine):
+        def rename_target_clip(self, clip_name, new_name):
+            raise RuntimeError("PT_InvalidParameter (Can't found clip: stereo_probe)")
+
+    export = _export(
+        ("Gtr #aaaaaaaa", [("stereo_probe", 0, 48000), ("keeper", 96000, 48000)]),
+    )
+    engine = _RefusingEngine([_NativeTrack("Gtr #aaaaaaaa")], export)
+    session = Session()
+    warnings: list[str] = []
+
+    ProToolsBackend()._pull(engine, session, store, warnings)
+
+    assert [c.name for c in session.tracks[0].clips] == ["stereo_probe", "keeper"], (
+        "both clips must still be published"
+    )
+    assert any("could not be tagged" in w for w in warnings)
+    assert any("stereo_probe" in w for w in warnings)
+
+
+def test_a_track_that_cannot_be_renamed_does_not_abort_the_publish(store):
+    class _RefusingEngine(_Engine):
+        def rename_target_track(self, old_name, new_name):
+            raise RuntimeError("PT_InvalidParameter")
+
+    engine = _RefusingEngine([_NativeTrack("Fiddle")], _export(("Fiddle", [])))
+    session = Session()
+    warnings: list[str] = []
+
+    ProToolsBackend()._pull(engine, session, store, warnings)
+
+    assert len(session.tracks) == 1
+    assert any("could not be tagged" in w for w in warnings)
+
+
 def test_pull_works_without_a_warnings_list(store):
     # The optional out-parameter must stay optional.
     engine = _Engine([_NativeTrack("Gtr #aaaaaaaa")], _export(("Gtr #aaaaaaaa", [])))

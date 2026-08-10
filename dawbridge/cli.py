@@ -34,11 +34,11 @@ import getpass
 import sys
 from pathlib import Path
 
-from . import conflicts, syncstate
+from . import checks, syncstate
 from .backend import Backend
 from .model import Session, UnsupportedSchemaVersion
 from .store import SharedSessionMoved, SharedStore
-from .sync import find_overlapping_clips, preview_push
+from .sync import preview_push
 
 
 def _at(seconds: float | None) -> str:
@@ -324,9 +324,8 @@ def cmd_restore(args: argparse.Namespace) -> int:
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Answer "is this shared folder OK?" without touching a DAW.
 
-    Everything here is deliberately read-only and metadata-only: the folder
-    lives in Dropbox, where files can be cloud-only placeholders and reading
-    one forces a download. Existence and size, never contents.
+    The checking lives in `checks.py` so this and the GUI's "Check folder"
+    button cannot drift into disagreeing about whether a folder is healthy.
     """
     root = Path(args.folder)
     store = SharedStore(root)
@@ -340,63 +339,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"[doctor] {len(session.tracks)} track(s), "
           f"{sum(len(t.clips) for t in session.tracks)} clip(s)")
 
-    problems: list[str] = []
+    problems, orphans = checks.check_folder(store)
 
-    # A conflicted copy is the one failure the revision number physically
-    # cannot express - both machines advance from the same revision to the
-    # same number - so it has to be found by looking at filenames.
-    problems.extend(conflicts.describe_conflicts(root))
-
-    referenced = {c.audio_file for t in session.tracks for c in t.clips if c.audio_file}
-    missing = sorted(f for f in referenced if not store.resolve_audio_path(f).exists())
-    for name in missing:
-        owners = [f"{t.name}/{c.name}" for t in session.tracks
-                  for c in t.clips if c.audio_file == name]
-        problems.append(f"audio missing from the shared folder: {name} "
-                        f"(used by {', '.join(owners[:3])})")
-    if missing:
-        problems.append("missing audio can also just mean Dropbox hasn't finished "
-                        "syncing - check the sync icon before assuming it's lost")
-
-    for track in session.tracks:
-        if not track.clips:
-            continue
-        overlaps = find_overlapping_clips(track.clips)
-        for a, b in overlaps:
-            problems.append(f"clips overlap on {track.name!r}: {a.name} and {b.name}")
-
-    silent = [c.name for t in session.tracks for c in t.clips if not c.audio_file]
-    if silent:
-        problems.append(f"{len(silent)} clip(s) reference no audio at all: "
-                        f"{', '.join(silent[:4])}")
-
-    # Unreferenced audio is not a fault - archived revisions legitimately
-    # keep files the current session doesn't - so it's reported separately
-    # and only counted against what nothing at all points to.
-    kept = set(referenced)
-    for _rev, path in store.list_archive():
-        try:
-            kept |= {c.audio_file for t in Session.load(path).tracks
-                     for c in t.clips if c.audio_file}
-        except Exception:
-            pass
-    if store.audio_dir.is_dir():
-        on_disk = {p.name: p.stat().st_size for p in store.audio_dir.iterdir() if p.is_file()}
-        orphans = sorted(set(on_disk) - kept)
-        if orphans:
-            mb = sum(on_disk[o] for o in orphans) / 1e6
-            print(f"\n[doctor] {len(orphans)} audio file(s) referenced by nothing "
-                  f"({mb:.0f} MB reclaimable) - not a fault, just housekeeping:")
-            for o in orphans[:8]:
-                print(f"    {on_disk[o]/1e6:8.1f} MB  {o}")
+    if orphans:
+        mb = sum(size for _name, size in orphans) / 1e6
+        print(f"\n[doctor] {len(orphans)} audio file(s) referenced by nothing "
+              f"({mb:.0f} MB reclaimable) - not a fault, just housekeeping:")
+        for name, size in orphans[:8]:
+            print(f"    {size/1e6:8.1f} MB  {name}")
 
     if not problems:
         print("\n[doctor] no problems found.")
         return 0
 
     print(f"\n[doctor] {len(problems)} problem(s):")
-    for p in problems:
-        for i, line in enumerate(str(p).splitlines()):
+    for problem in problems:
+        for i, line in enumerate(str(problem).splitlines()):
             print(("    " if i == 0 else "      ") + line)
     return 1
 

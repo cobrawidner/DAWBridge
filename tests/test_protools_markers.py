@@ -22,7 +22,6 @@ from dawbridge.protools_backend import (
     ProToolsBackend,
     _format_pt_time,
     _parse_pt_time,
-    _pt_time_style,
 )
 from dawbridge.store import SharedStore
 
@@ -45,9 +44,21 @@ class _Engine:
     def session_sample_rate(self): return self._rate
     def get_memory_locations(self): return self.locations
 
-    def create_memory_location(self, start_time=None, name=None, **kw):
+    def create_memory_location(self, start_time=None, name=None, memory_number=None, **kw):
+        # Pro Tools rejects a number that is already in use, and auto-
+        # assigns a colliding one when none is given - confirmed live:
+        # "PT_InvalidParameter (Such a memory location number is already
+        # used. You can use EditMemoryLocation command to edit it.)"
+        used = {loc.number for loc in self.locations}
+        if memory_number is None:
+            memory_number = 32000  # what PT actually handed out, every time
+        if memory_number in used:
+            raise RuntimeError(
+                "ErrType 126: PT_InvalidParameter (Such a memory location number is "
+                "already used. You can use EditMemoryLocation command to edit it.)"
+            )
         self.created.append((name, start_time))
-        self.locations.append(_Location(len(self.locations) + 1, name, start_time))
+        self.locations.append(_Location(memory_number, name, start_time))
 
     def edit_memory_location(self, location_number, name, start_time, **kw):
         self.edited.append((location_number, name, start_time))
@@ -64,30 +75,37 @@ def marker_enums(monkeypatch):
 
 # ---- the time formats -------------------------------------------------
 
-def test_recognises_only_the_formats_that_round_trip_exactly():
-    assert _pt_time_style("1587600") == "samples"
-    assert _pt_time_style("1:04.286") == "minsecs"
-    assert _pt_time_style("00:01:04:07") is None, "timecode is quantised to whole frames"
-    assert _pt_time_style("33|1|000") is None, "bars|beats needs a tempo map we don't have"
-    assert _pt_time_style("12+05") is None
-    assert _pt_time_style("") is None
+def test_samples_is_what_pro_tools_actually_reports():
+    """SETTLED BY LIVE TEST against Pro Tools 2025.
+
+    get_memory_locations() reports start_time in samples no matter what
+    the main counter is set to - verified by flipping the counter to
+    Bars|Beats, TimeCode and Min:Secs and re-reading the same marker,
+    which came back '480000' every time. That is the case that mattered,
+    because the push path changes the counter to Bars|Beats on every run.
+    """
+    assert _parse_pt_time("1587600", 44100) == 36.0
+    assert _parse_pt_time("480000", 48000) == 10.0
 
 
 def test_samples_convert_exactly_both_ways():
     seconds = _parse_pt_time("1587600", 44100)
     assert seconds == 36.0
-    assert _format_pt_time(seconds, "samples", 44100) == "1587600"
+    assert _format_pt_time(seconds, 44100) == "1587600"
 
 
-def test_minsecs_convert_both_ways():
+def test_minsecs_is_still_accepted_on_the_way_in():
+    # Not what PT 2025 reports, but free to support, and it would be a
+    # silent drop if a future version changed its mind.
     assert _parse_pt_time("1:04.286", 48000) == pytest.approx(64.286)
-    assert _format_pt_time(64.286, "minsecs", 48000) == "1:04.286"
     assert _parse_pt_time("2:00:30.500", 48000) == pytest.approx(7230.5)
 
 
 def test_a_format_we_cannot_convert_returns_nothing_rather_than_a_guess():
+    # Timecode is quantised to whole frames; bars|beats needs a tempo map
+    # canonical doesn't carry. Refuse rather than place approximately.
     assert _parse_pt_time("00:01:04:07", 48000) is None
-    assert _format_pt_time(64.0, "timecode", 48000) is None
+    assert _parse_pt_time("33|1|000", 48000) is None
 
 
 # ---- reading ----------------------------------------------------------
@@ -132,7 +150,7 @@ def test_an_unreachable_pro_tools_reports_unknown_not_empty():
 
 # ---- writing ----------------------------------------------------------
 
-def test_writes_markers_in_the_format_pro_tools_itself_uses():
+def test_writes_markers_in_samples():
     engine = _Engine([_Location(1, "Existing #aaaaaaaa", "48000")], rate=48000)
     session = Session()
     session.markers = [
@@ -143,29 +161,28 @@ def test_writes_markers_in_the_format_pro_tools_itself_uses():
 
     ProToolsBackend()._push_markers(engine, session, warnings)
 
-    assert engine.created == [("Chorus #bbbbbbbb", "1536000")], "learned samples from the example"
+    assert engine.created == [("Chorus #bbbbbbbb", "1536000")]
     assert warnings == []
 
 
-def test_refuses_to_write_when_there_is_nothing_to_learn_the_format_from():
-    """The honest outcome, and why it isn't a shrug.
+def test_writes_into_a_session_that_has_no_markers_at_all():
+    """This used to refuse.
 
-    With no existing memory location, the unit of the position string is
-    unknowable, and there is no safe way to experiment: a wrongly-placed
-    marker can only be removed with clear_all_memory_locations, which
-    would take the user's own markers with it.
+    The backend previously learned the position format from an existing
+    memory location and, with none to learn from, wrote nothing and told
+    the user to place them by hand. The live test showed there was
+    nothing to learn: samples are always correct. An empty session is the
+    ordinary case - somebody's first push - and it now just works.
     """
     engine = _Engine([], rate=48000)
     session = Session()
-    session.markers = [Marker(id="bbbbbbbb", name="Chorus", time_seconds=64.286)]
+    session.markers = [Marker(id="bbbbbbbb", name="Chorus", time_seconds=32.0)]
     warnings: list[str] = []
 
     ProToolsBackend()._push_markers(engine, session, warnings)
 
-    assert engine.created == [], "nothing written"
-    assert len(warnings) == 1
-    assert "'Chorus' at 1:04.286" in warnings[0], "list the positions so it's a minute of work"
-    assert "Add any one marker by hand" in warnings[0], "say how to make it work next time"
+    assert engine.created == [("Chorus #bbbbbbbb", "1536000")]
+    assert warnings == []
 
 
 def test_a_second_push_moves_markers_instead_of_adding_them():
@@ -248,3 +265,43 @@ def test_a_marker_removed_in_pro_tools_is_reported_when_the_publish_drops_it():
 
     assert session.markers == []
     assert any("'Chorus'" in w and "removes them" in w for w in warnings)
+
+
+def test_several_markers_in_one_push_all_get_created():
+    """Found by live test, and it made markers useless beyond the first.
+
+    create_memory_location without an explicit memory_number let Pro
+    Tools auto-assign, and it handed out the SAME number every time:
+    the first marker was created as #32000 and every one after it failed
+    with "Such a memory location number is already used". A three-marker
+    push produced one marker and two warnings.
+    """
+    engine = _Engine([], rate=48000)
+    session = Session()
+    session.markers = [
+        Marker(id="11111111", name="Intro", time_seconds=0.0),
+        Marker(id="22222222", name="Verse", time_seconds=12.5),
+        Marker(id="33333333", name="Chorus", time_seconds=32.0),
+    ]
+    warnings: list[str] = []
+
+    ProToolsBackend()._push_markers(engine, session, warnings)
+
+    assert [n for n, _t in engine.created] == [
+        "Intro #11111111", "Verse #22222222", "Chorus #33333333",
+    ]
+    assert warnings == []
+    assert len({loc.number for loc in engine.locations}) == 3, "each needs its own number"
+
+
+def test_new_markers_do_not_collide_with_numbers_already_in_use():
+    engine = _Engine([_Location(1, "theirs", "0"), _Location(2, "theirs too", "48000")], rate=48000)
+    session = Session()
+    session.markers = [Marker(id="11111111", name="Intro", time_seconds=5.0)]
+    warnings: list[str] = []
+
+    ProToolsBackend()._push_markers(engine, session, warnings)
+
+    assert warnings == []
+    numbers = sorted(loc.number for loc in engine.locations)
+    assert numbers == [1, 2, 3], "should take the next free number, not stamp on theirs"

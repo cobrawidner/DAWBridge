@@ -34,6 +34,8 @@ out to it — the same way those words work in any other tool.
 | **Push to Bridge** | Sends what's in **your DAW** out to the shared folder. This is how you publish. Do this when you're done. |
 | **Preview pull** | Shows exactly what "Pull from Bridge" would change, and changes nothing. Free to click. |
 | **Refresh status** | Re-reads the shared folder and shows what's there right now. |
+| **Check folder** | Looks for problems — missing audio, conflicted copies, overlapping clips. Changes nothing. |
+| **History...** | The last 20 versions of the shared session, and a way to put one back. |
 
 If you remember nothing else: **pull to get theirs, push to send yours.**
 
@@ -118,11 +120,16 @@ from being lost forever, including publishing over someone. That's the thing
 to remember when a warning appears and you're not sure: it's recoverable, so
 stop and ask rather than guessing.
 
-Recovery isn't in the app yet. If you're running `DAWBridge.exe`, the buttons
-in the window are all you have — **contact whoever set this up** and say what
-happened and roughly when. That's enough to get the right version back.
+**Check folder** tells you whether anything is wrong, and **History...** shows
+the last 20 versions — who published each, when, and how many tracks it had —
+with a Restore button. Restoring publishes the old version as a *new* one, so
+it doesn't rewind, your collaborator's copy notices, and what it replaces is
+archived too. It changes only the shared folder; use **Pull from Bridge**
+afterwards to get it into your DAW.
 
-If you have the developer setup (Python and the source), the tools are:
+If that isn't enough, **contact whoever set this up** and say what happened
+and roughly when. With the developer setup the same tools exist on the
+command line:
 
 ```bash
 python -m dawbridge.cli doctor --folder "<the shared folder>"

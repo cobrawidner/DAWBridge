@@ -67,22 +67,32 @@ KNOWN GAP: automation curves are not exposed by PTSL as of this writing
 this backend does not attempt to read or write automation. See the
 feasibility notes for what that means for scope.
 
-MARKERS: memory locations ARE exposed properly - `get_memory_locations()`
+MARKERS: memory locations are exposed properly - `get_memory_locations()`
 returns structured messages and `create_memory_location()` /
 `edit_memory_location()` write them, so this backend reads and writes
-markers. The one thing PTSL does NOT say is what unit a location's
-position string is in: `CreateMemoryLocationRequestBody` has no
-time-type field at all (verified against the installed protobufs),
-unlike `SpotClipsByID` and `set_timeline_selection`, which both take an
-explicit `TimelineLocationType`. So the position is in whatever format
-the session happens to be displaying, and nothing in the message says
-which. Reading therefore converts only the formats that round-trip
-exactly (samples, min:secs) and skips the rest out loud; writing copies
-the format from a location Pro Tools itself wrote, and if there isn't
-one, writes nothing and says so with the positions listed. Guessing
-would put every marker at a confidently wrong position, and a
-misplaced marker looks exactly like a correct one. NOT verified against
-a live Pro Tools - see the report accompanying this change.
+markers. `CreateMemoryLocationRequestBody` carries no time-type field
+(unlike `SpotClipsByID` and `set_timeline_selection`, which both take an
+explicit `TimelineLocationType`), which looked like an unresolvable
+ambiguity about what unit the position string is in. Settled by live
+test against Pro Tools 2025:
+  - reads are ALWAYS in samples, whatever the main counter is set to
+    (checked against Bars|Beats, TimeCode and Min:Secs in turn - the same
+    marker read back '480000' every time). This matters because
+    `_use_bars_beats_counter()` changes the counter on every push.
+  - writes accept several formats and resolve them correctly:
+    "00:00:10:00", "480000" and "0:10.000" all landed at exactly 480000
+    samples in a 48kHz session, cross-checked against the text export.
+So samples are exact in both directions and nothing has to be guessed.
+
+CANNOT MOVE AN EXISTING CLIP: `_push_clips` warns rather than re-applying
+a moved clip's position, and that is a real limit of PTSL 2025, not
+laziness. `CId_GetClipList` exists in the protocol but returns an empty
+list even with clips on the timeline and a selection made (confirmed
+live). And re-spotting a clip's own ids with `SpotClipsByID` does not
+move it - it places a SECOND copy (confirmed live: one clip at 4s became
+two, at 4s and 10s). So there is no read path to a timeline clip's
+identity and no write path that moves one; a naive "just spot it again"
+fix would silently duplicate every moved clip.
 
 KNOWN CAVEAT: the text-export clip-name column is a fixed display width;
 a very long tagged clip name could in principle be truncated in the
@@ -200,7 +210,7 @@ class ProToolsBackend(Backend):
         PTSL does expose these properly (get_memory_locations returns
         structured messages, not display text), so unlike clips there's
         no text export to parse. What it does NOT expose is the unit of
-        the position string - see _pt_time_style. A location whose
+        the position string - see _parse_pt_time. A location whose
         position can't be converted exactly is dropped WITH a warning
         rather than converted approximately.
         """
@@ -242,26 +252,6 @@ class ProToolsBackend(Backend):
             )
         return markers
 
-    def _marker_write_style(self, engine, markers: list[LiveMarker]) -> str | None:
-        """Which position format to write memory locations in, learned
-        from one Pro Tools already has, or None if we can't tell.
-
-        Nothing in PTSL states the unit, and there is no safe way to
-        find out by experiment: a wrongly-placed marker can only be
-        removed with clear_all_memory_locations, which would take the
-        user's own markers with it. So the format is copied from a
-        location Pro Tools itself wrote, and if there isn't one, nothing
-        is written.
-        """
-        try:
-            for location in engine.get_memory_locations():
-                style = _pt_time_style(location.start_time)
-                if style:
-                    return style
-        except Exception:
-            return None
-        return None
-
     def _push_markers(self, engine, session: Session, warnings: list[str]) -> None:
         from ptsl.PTSL_pb2 import MemoryLocationReference, TimeProperties
 
@@ -280,32 +270,38 @@ class ProToolsBackend(Backend):
                 )
             return
 
-        style = self._marker_write_style(engine, live)
         sample_rate = int(engine.session_sample_rate())
-        if style is None:
-            # The honest outcome. Listing the positions makes it a minute
-            # of manual work instead of a mystery.
-            wanted = ", ".join(
-                f"{m.name!r} at {_format_pt_time(m.time_seconds, 'minsecs', sample_rate)}"
-                for m in (plan.to_add + plan.to_update)[:12]
-            )
-            warnings.append(
-                f"{len(plan.to_add) + len(plan.to_update)} marker(s) were NOT written into Pro "
-                f"Tools. Its scripting API takes a memory location's position as a plain string "
-                f"with no unit attached, and this session has no existing marker to copy the "
-                f"format from - writing one would be a guess, and a marker in the wrong place "
-                f"looks exactly like a marker in the right place. Add any one marker by hand and "
-                f"push again and the rest will follow, or place these yourself: {wanted}"
-            )
-            return
+
+        # Every memory location needs its own number, and Pro Tools will
+        # NOT pick one for you: left to itself it handed out 32000 for the
+        # first marker and then rejected every one after it with "Such a
+        # memory location number is already used" (confirmed live - a
+        # three-marker push produced one marker and two warnings). Numbers
+        # already in the session belong to the user; take the free ones.
+        # Every location counts here, not just the markers in `live`: a
+        # selection or a window-configuration location holds a number too
+        # and would collide just the same.
+        try:
+            used_numbers = {loc.number for loc in engine.get_memory_locations()}
+        except Exception:
+            used_numbers = {m.native for m in live if isinstance(m.native, int)}
+        next_number = 1
+
+        def _claim_number() -> int:
+            nonlocal next_number
+            while next_number in used_numbers:
+                next_number += 1
+            used_numbers.add(next_number)
+            return next_number
 
         for marker in plan.to_add:
-            start = _format_pt_time(marker.time_seconds, style, sample_rate)
+            start = _format_pt_time(marker.time_seconds, sample_rate)
             if start is None:
                 warnings.append(f"marker {marker.name!r} could not be positioned in Pro Tools; skipped")
                 continue
             try:
                 engine.create_memory_location(
+                    memory_number=_claim_number(),
                     start_time=start,
                     name=tag(marker.name, marker.id),
                     time_properties=TimeProperties.TP_Marker,
@@ -316,7 +312,7 @@ class ProToolsBackend(Backend):
 
         for marker in plan.to_update:
             existing = live_by_id[marker.id]
-            start = _format_pt_time(marker.time_seconds, style, sample_rate)
+            start = _format_pt_time(marker.time_seconds, sample_rate)
             if start is None:
                 continue
             try:
@@ -373,7 +369,7 @@ class ProToolsBackend(Backend):
                         location_number=observed.native,
                         name=tag(marker.name, marker.id),
                         start_time=_format_pt_time(
-                            observed.time_seconds, "samples", int(engine.session_sample_rate())
+                            observed.time_seconds, int(engine.session_sample_rate())
                         ),
                         end_time="",
                         time_properties=None,
@@ -471,7 +467,16 @@ class ProToolsBackend(Backend):
             # captured fresh on every pull, not just on first adopt.
             track.muted = muted_by_track.get(key, False)
             if bridge_id is None:
-                engine.rename_target_track(old_name=raw_name, new_name=tag(base_name, track.id))
+                # Same exposure as the clip rename below - a refusal here
+                # must not cost the whole publish.
+                try:
+                    engine.rename_target_track(old_name=raw_name, new_name=tag(base_name, track.id))
+                except Exception as exc:
+                    warnings.append(
+                        f"track {base_name!r} could not be tagged in Pro Tools ({exc}), so the "
+                        f"next pull will treat it as a new track and your partner will collect a "
+                        f"duplicate - rename it by hand to {tag(base_name, track.id)!r}"
+                    )
 
             if export_failed:
                 # Nothing was read, so nothing is known to have changed.
@@ -522,7 +527,40 @@ class ProToolsBackend(Backend):
                 )
                 pulled_clips.append(new_clip)
                 if clip_id is None:
-                    engine.rename_target_clip(clip_name=clip_info["name"], new_name=tag(clip_base, new_clip.id))
+                    # Adoption stamps the bridge id into the clip's name.
+                    # Confirmed live against Pro Tools 2025: this can fail
+                    # outright - PT_InvalidParameter ("Can't found clip:
+                    # stereo_probe") when the name is ambiguous on the
+                    # timeline - and unguarded it took the whole publish
+                    # down with it, writing nothing at all. push() had
+                    # this same failure fixed once already; the pull side
+                    # never did. The clip is still published; it just
+                    # won't be recognised next time, which is a warning,
+                    # not a catastrophe.
+                    try:
+                        # rename_file=False is NOT optional. py-ptsl
+                        # defaults it to True, which renames and rewrites
+                        # the underlying audio file on disk - confirmed
+                        # live here, not theorised: one pull turned
+                        # "stereo_probe.wav" into "stereo_probe
+                        # #fd13bc6f.wav" and grew it from 864044 to
+                        # 870160 bytes. Pro Tools imports by reference,
+                        # so the file it rewrites can be anywhere,
+                        # including the shared folder. The push path was
+                        # fixed for this long ago (see the module
+                        # docstring); this one never was.
+                        engine.rename_target_clip(
+                            clip_name=clip_info["name"],
+                            new_name=tag(clip_base, new_clip.id),
+                            rename_file=False,
+                        )
+                    except Exception as exc:
+                        warnings.append(
+                            f"clip {clip_base!r} on track {base_name!r} could not be tagged in "
+                            f"Pro Tools ({exc}), so the next pull will treat it as a new clip and "
+                            f"your partner will collect a duplicate - rename it by hand to "
+                            f"{tag(clip_base, new_clip.id)!r}"
+                        )
             track.clips = pulled_clips
 
         session.tracks = pulled_tracks
@@ -1238,65 +1276,55 @@ class ProToolsBackend(Backend):
             pass
 
 
-#: Pro Tools reports and accepts a memory location's position as a bare
-#: string - CreateMemoryLocationRequestBody has no time-type field at all
-#: (verified against the installed py-ptsl protobufs), unlike
-#: SpotClipsByID and set_timeline_selection which both take an explicit
-#: TimelineLocationType. So the unit is whatever the session is currently
-#: displaying, and nothing in the message says which. These recognise the
-#: formats that can be read back exactly; anything else is refused rather
-#: than guessed, because a misread unit puts every marker at a confidently
-#: wrong position, which is the failure this whole codebase keeps being
-#: bitten by.
+#: A memory location's position is a bare string with no unit attached -
+#: CreateMemoryLocationRequestBody has no time-type field, unlike
+#: SpotClipsByID and set_timeline_selection which both carry an explicit
+#: TimelineLocationType. That looked like an unresolvable ambiguity, so
+#: this backend used to learn the format from an existing marker and
+#: refuse to write when there wasn't one.
+#:
+#: SETTLED BY LIVE TEST against Pro Tools 2025, and the answer is much
+#: better than the guess:
+#:   - get_memory_locations() ALWAYS reports start_time in samples,
+#:     regardless of the main counter format. Verified by setting the
+#:     counter to Bars|Beats, TimeCode and Min:Secs in turn and re-reading
+#:     the same marker: '480000' every time. That matters because
+#:     _use_bars_beats_counter() changes the counter on every push.
+#:   - Writing accepts several formats and resolves them correctly:
+#:     "00:00:10:00", "480000" and "0:10.000" all landed at exactly
+#:     480000 samples in a 48kHz session, cross-checked against the
+#:     session text export in samples.
+#: So samples are exact in both directions and there is nothing to guess.
 _PT_SAMPLES_RE = re.compile(r"^\d+$")
 _PT_MINSECS_RE = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2}(?:\.\d+)?)$")
 
 
-def _pt_time_style(text: str) -> str | None:
-    """"samples" | "minsecs" for a position string we can convert exactly,
-    else None (timecode, bars|beats, feet+frames, or anything unfamiliar).
+def _parse_pt_time(text: str, sample_rate: int) -> float | None:
+    """Memory location position string -> seconds, or None if it isn't a
+    format that converts exactly.
 
-    Timecode is deliberately not in the list even though it looks
-    parseable: it is quantised to whole frames, and rounding a position
-    to the nearest frame is exactly the bug that was already found and
-    fixed once on the clip path.
+    Samples is what Pro Tools 2025 actually reports (confirmed live).
+    Min:Secs is accepted too because it costs nothing and would otherwise
+    be a silent drop if a future version changed its mind. Anything else
+    - timecode (quantised to whole frames), bars|beats (needs a tempo map
+    canonical doesn't have) - returns None so the caller can say so
+    instead of placing the marker approximately.
     """
     text = (text or "").strip()
     if _PT_SAMPLES_RE.match(text):
-        return "samples"
-    if _PT_MINSECS_RE.match(text):
-        return "minsecs"
-    return None
-
-
-def _parse_pt_time(text: str, sample_rate: int) -> float | None:
-    """Position string -> seconds, or None if the format isn't one we can
-    convert without guessing.
-    """
-    text = (text or "").strip()
-    style = _pt_time_style(text)
-    if style == "samples":
         return int(text) / float(sample_rate) if sample_rate else None
-    if style == "minsecs":
-        hours, minutes, seconds = _PT_MINSECS_RE.match(text).groups()
+    match = _PT_MINSECS_RE.match(text)
+    if match:
+        hours, minutes, seconds = match.groups()
         return int(hours or 0) * 3600 + int(minutes) * 60 + float(seconds)
     return None
 
 
-def _format_pt_time(seconds: float, style: str, sample_rate: int) -> str | None:
-    """Seconds -> a position string in `style`, or None if we can't.
-
-    The inverse of _parse_pt_time, and only for styles that round-trip
-    exactly - see _pt_time_style.
-    """
-    if seconds < 0:
+def _format_pt_time(seconds: float, sample_rate: int) -> str | None:
+    """Seconds -> the sample-count string Pro Tools reports and accepts."""
+    if seconds < 0 or not sample_rate:
         return None
-    if style == "samples":
-        return str(int(round(seconds * sample_rate))) if sample_rate else None
-    if style == "minsecs":
-        minutes, remainder = divmod(float(seconds), 60)
-        return f"{int(minutes)}:{remainder:06.3f}"
-    return None
+    return str(int(round(seconds * sample_rate)))
 
 
 def _clip_bucket_key(track_name: str) -> str:

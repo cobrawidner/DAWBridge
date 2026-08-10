@@ -15,8 +15,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import syncstate, theme
+from . import checks, syncstate, theme
 from .backend import Backend
+from .model import Session
 from .store import SharedSessionMoved, SharedStore
 from .sync import preview_push
 
@@ -31,6 +32,19 @@ def _get_backend(daw: str) -> Backend:
     from .protools_backend import ProToolsBackend
 
     return ProToolsBackend()
+
+
+def _worth_restoring(path: Path) -> bool:
+    """False for the empty session a new shared folder starts life with.
+
+    An unreadable revision counts as worth showing: better a row saying
+    it can't be read than a version silently missing from the history.
+    """
+    try:
+        session = Session.load(path)
+    except Exception:
+        return True
+    return bool(session.tracks or session.updated_by)
 
 
 def _load_config() -> dict:
@@ -56,7 +70,12 @@ class DawBridgeGUI(ttk.Frame):
         # Silently keeps Tk's default icon if assets/dawbridge.ico has
         # not been generated yet - `python tools/build_exe.py --icon-only`.
         theme.apply_window_icon(self.master)
-        self.master.minsize(660, 580)
+        # Wide enough that the button row never clips. Measured, not
+        # guessed: the row needs 752px and the body pads 16 each side, so
+        # anything narrower hides whichever button is last - which was
+        # "History...", the one someone reaches for when something has
+        # gone wrong and they are least able to go hunting for it.
+        self.master.minsize(784, 580)
         self.grid(sticky="nsew")
         self.master.columnconfigure(0, weight=1)
         self.master.rowconfigure(0, weight=1)
@@ -163,6 +182,12 @@ class DawBridgeGUI(ttk.Frame):
         theme.separator(button_frame, orient="vertical").pack(side="left", fill="y", padx=14)
         self.refresh_btn = ttk.Button(button_frame, text="Refresh status", command=self._refresh_status)
         self.refresh_btn.pack(side="left")
+        # Both sit right of the groove: they only look. Restoring is a
+        # change, so it lives behind the History window and asks first.
+        self.check_btn = ttk.Button(button_frame, text="Check folder", command=self._on_check)
+        self.check_btn.pack(side="left", padx=(8, 0))
+        self.history_btn = ttk.Button(button_frame, text="History...", command=self._on_history)
+        self.history_btn.pack(side="left", padx=(8, 0))
 
         theme.separator(body).grid(row=4, column=0, columnspan=3, sticky="ew", pady=(16, 0))
 
@@ -261,6 +286,8 @@ class DawBridgeGUI(ttk.Frame):
         self.load_btn.configure(state=state)
         self.publish_btn.configure(state=state)
         self.refresh_btn.configure(state=state)
+        self.check_btn.configure(state=state)
+        self.history_btn.configure(state=state)
 
         colour = theme.READOUT_WARN if busy else theme.READOUT_GOOD
         theme.set_led(self.led, colour)
@@ -323,6 +350,130 @@ class DawBridgeGUI(ttk.Frame):
 
     def _on_load(self) -> None:
         self._run_async(self._do_load)
+
+    def _on_check(self) -> None:
+        self._run_async(self._do_check)
+
+    def _do_check(self, folder: Path) -> None:
+        """"Check folder" - the GUI half of `dawbridge doctor`.
+
+        Runs on the worker thread: it stats every referenced audio file,
+        and on a Dropbox folder that is not instant.
+        """
+        store = SharedStore(folder)
+        if not store.session_path.exists():
+            self.master.after(0, lambda: self._log(
+                "[check] nothing has been published to this folder yet."))
+            return
+
+        problems, orphans = checks.check_folder(store)
+        lines = [f"[check] {len(problems)} problem(s) found."
+                 if problems else "[check] no problems found."]
+        for problem in problems:
+            lines += [f"    {line}" for line in str(problem).splitlines()]
+        if orphans:
+            mb = sum(size for _n, size in orphans) / 1e6
+            lines.append(f"[check] {len(orphans)} audio file(s) referenced by nothing "
+                         f"({mb:.0f} MB) - housekeeping, not a fault.")
+        for line in lines:
+            self.master.after(0, lambda line=line: self._log(line))
+
+    def _on_history(self) -> None:
+        """Past revisions, and a way back to one.
+
+        The archive keeps 20 revisions, but until now reaching them meant
+        a terminal and a Python install - which the person most likely to
+        need them, the collaborator running the .exe, does not have. A
+        safety net nobody can reach is not a safety net.
+        """
+        folder = self._require_folder()
+        if folder is None:
+            return
+        store = SharedStore(folder)
+        try:
+            current = store.load()
+            archived = store.list_archive()
+        except Exception as exc:
+            self._log(f"[history] could not read the shared folder: {exc}")
+            return
+        # Drop the placeholder `ensure_layout` writes when a folder is
+        # first created: no tracks, no author, nothing anyone published.
+        # Offering it as a restore target gives a worried person a way to
+        # empty the shared session with two clicks, for no benefit.
+        archived = [(rev, path) for rev, path in archived if _worth_restoring(path)]
+        if not archived:
+            self._log("[history] nothing archived yet - the archive fills up as people publish.")
+            return
+
+        win = tk.Toplevel(self.master)
+        win.title("DAWBridge - history")
+        win.configure(background=theme.CHASSIS)
+        win.transient(self.master)
+        win.minsize(560, 320)
+
+        ttk.Label(win, text=theme.tracked("Past revisions"),
+                  style="Legend.TLabel").pack(anchor="w", padx=14, pady=(14, 6))
+
+        bezel = theme.Recess(win)
+        bezel.pack(fill="both", expand=True, padx=14)
+        listbox = tk.Listbox(
+            bezel.well, background=theme.DISPLAY, foreground=theme.READOUT_INK,
+            selectbackground=theme.READOUT_SELECT, selectforeground=theme.READOUT_BRIGHT,
+            font=theme.FONTS["mono_small"], borderwidth=0, highlightthickness=0,
+            activestyle="none",
+        )
+        listbox.pack(fill="both", expand=True, padx=6, pady=6)
+        for revision, path in archived:
+            listbox.insert("end", checks.describe_revision(revision, path))
+        listbox.selection_set(0)
+
+        note = ttk.Label(
+            win, wraplength=520, justify="left",
+            text=(f"The shared session is at r{current.revision}. Restoring publishes an "
+                  f"older version as a new revision - it does not rewind, so your "
+                  f"collaborator sees the change, and what it replaces is archived too."),
+        )
+        note.pack(anchor="w", padx=14, pady=(10, 0))
+
+        row = ttk.Frame(win, style="Chassis.TFrame")
+        row.pack(fill="x", padx=14, pady=14)
+        ttk.Button(row, text="Restore selected",
+                   command=lambda: self._restore_selected(win, store, archived, listbox)
+                   ).pack(side="left")
+        ttk.Button(row, text="Close", command=win.destroy).pack(side="left", padx=(8, 0))
+
+    def _restore_selected(self, win: tk.Toplevel, store, archived, listbox) -> None:
+        selection = listbox.curselection()
+        if not selection:
+            return
+        revision, path = archived[selection[0]]
+        try:
+            candidate = Session.load(path)
+        except Exception as exc:
+            messagebox.showerror("DAWBridge", f"Could not read r{revision}: {exc}")
+            return
+
+        if not messagebox.askyesno(
+            "DAWBridge - restore",
+            f"Restore r{revision}?\n\n"
+            f"{len(candidate.tracks)} track(s), published by {candidate.updated_by or '?'}.\n\n"
+            f"This replaces what's currently in the shared folder. It becomes a new "
+            f"revision, and the version it replaces is archived, so this is undoable.\n\n"
+            f"It does not change your DAW - use Pull from Bridge afterwards.",
+            parent=win,
+        ):
+            return
+
+        try:
+            restored = store.restore_archived(revision, updated_by="gui@restore")
+        except Exception as exc:
+            messagebox.showerror("DAWBridge", f"Restore failed: {exc}", parent=win)
+            return
+        self._log(f"[history] restored r{revision} as r{restored.revision} "
+                  f"({len(restored.tracks)} track(s)). Use Pull from Bridge to get it "
+                  f"into your DAW.")
+        win.destroy()
+        self._refresh_status()
 
     def _describe_preview(self, preview, session, folder: Path, daw: str) -> list[str]:
         """The preview as log lines - same content the CLI prints."""
