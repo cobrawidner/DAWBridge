@@ -153,7 +153,15 @@ replaced is kept too, which makes an unwanted restore undoable.
 
 Being upfront so nothing surprises you mid-session:
 
-- **Markers** are being implemented. Don't rely on them crossing yet.
+- **Markers** cross both ways, but haven't been tested against a live DAW
+  yet. In Pro Tools they need at least one memory location that Pro Tools
+  itself created before DAWBridge will write any - it copies the time format
+  from yours rather than guessing, because guessing would put every marker at
+  a confidently wrong position. If none exists it writes nothing and tells you
+  what it skipped.
+- **Reaper regions** don't cross. Only markers do — a region has a start and
+  an end, and the shared format has nowhere to put the end, so publishing one
+  would quietly flatten it to a point. You get a warning instead.
 - **Time signature** is read but not applied. If your song isn't in 4/4, set
   the meter yourself on the receiving side — the tempo does cross.
 - **Fades** cross from the shared folder into your DAW, but aren't read back
