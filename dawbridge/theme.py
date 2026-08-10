@@ -24,11 +24,17 @@ Three things are load-bearing and easy to get wrong:
    the log, LEDs - sits on `DISPLAY` (#101315) and never on the
    faceplate: LED green on mid-grey measures about 2.4:1 and is
    genuinely unreadable, while the same green on the readout clears 7:1.
-   The readout stays dark even if a light "brushed aluminium" chassis is
-   ever added, because a display is dark whatever colour the case is.
-   That is why the `READOUT_*` colours below are separate literals
-   rather than aliases of the chassis ink tokens: a chassis token used
-   on the readout would go dark-on-dark the moment a light theme exists.
+   A display is dark whatever colour the case is, so the readout ground
+   is a fixed literal and not a token anything else can move. The
+   `READOUT_*` inks are separate literals for the same reason: they are
+   chosen against #101315 specifically, and aliasing them to the chassis
+   ink tokens would couple the one surface whose colours are decided by
+   physics to the one surface whose colours are decided by taste.
+
+   There is no light theme, and that is a decision rather than an
+   omission - see the note above `MARK_TILE` for the measurements that
+   settled it. This rule is unaffected by it: the readout was never dark
+   because the chassis is dark.
 
 3. **Colour is a signal, not decoration.** The readouts are almost
    monochrome on purpose. Accent marks only the short bracketed source
@@ -47,7 +53,7 @@ from tkinter import font as tkfont
 from tkinter import ttk
 
 # --------------------------------------------------------------- palette
-# The faceplate. These are the tokens that would flip in a light theme.
+# The faceplate. One set of values, not a theme: the app is dark only.
 CHASSIS = "#31363d"      # the case
 PANEL = "#3c424a"        # raised surface
 PANEL_HI = "#464d56"     # hover / active surface, title bars
@@ -66,7 +72,7 @@ LED_GOOD = "#63c07a"
 LED_CRIT = "#cf5b4e"
 METER_MID = "#d9a83f"
 
-# The readout ground. Fixed dark in every theme.
+# The readout ground. Fixed by what a display is, not by the palette.
 DISPLAY = "#101315"
 DISPLAY_EDGE = "#0a0c0d"
 
@@ -430,12 +436,25 @@ def set_led(canvas: tk.Canvas, colour: str) -> None:
 # cannot give it.
 #
 # The mark carries its own dark ground, which is the readout rule again -
-# a badge is dark whatever colour the chassis is. That is not only taste.
-# Measured on the light "brushed aluminium" chassis, every candidate
-# accent dies: steel blue 1.3:1, the orange 1.5:1, the red 2.3:1. On the
-# tile the same colours clear 3.9-6.8:1 and the theme cannot touch them.
-# A taskbar icon has the same problem with more unknowns, since it brings
-# its own background.
+# a badge is dark whatever colour the chassis is. That is not only taste,
+# and the measurement behind it is also why this app has no light theme.
+#
+# A light "brushed aluminium" chassis (#aeb3ba) was drawn and measured.
+# Every accent in the system fails on it against a 3:1 floor:
+#
+#     steel blue #6d9fd0   1.3:1     the accent already shipping
+#     orange     #f26a1f   1.5:1
+#     red        #d2382a   2.3:1
+#
+# The choices were darkened variants of every accent, or no light theme.
+# No light theme won: a half-broken second skin that only some viewers
+# ever see is worse than one surface built properly. The general rule it
+# leaves behind is worth keeping - **a saturated accent needs a dark
+# ground**, because saturation costs luminance and a light ground has
+# none to spare. On the tile these same colours clear 3.9-6.8:1, which is
+# the whole argument for the mark carrying its own. A taskbar icon has
+# the same problem with more unknowns, since it brings its own
+# background, and gets the same protection for free.
 MARK_TILE = "#0e1114"
 MARK_METAL = "#e2e7ea"
 
