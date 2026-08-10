@@ -20,6 +20,14 @@ that's `C:\Users\Travis\Claude Code\dawbridge`; in a cloud checkout it's
 wherever the repo was cloned. Use repo-relative paths so your work holds in
 both places.
 
+## Read the backlog first
+
+`docs/BACKLOG.md` holds the plan and, more importantly for you, a
+"decided — do not re-litigate" section recording which design questions
+are already settled and why. The light theme and the mark are both in
+there. Update it when you finish something or learn something that
+changes the order.
+
 ## The established design direction
 
 **Early-2000s professional audio hardware.** Think the faceplate of a

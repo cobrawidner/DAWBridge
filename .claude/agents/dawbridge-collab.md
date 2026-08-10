@@ -48,6 +48,17 @@ unilaterally rename it.
   same track is recognised across two DAWs that share no identifiers.
 - **Audio is content-hash deduped** in a shared `audio/` directory.
 
+## Read the backlog first
+
+`docs/BACKLOG.md` holds the plan: what's queued and in what order, what's
+blocked on Travis, what's blocked on a live DAW, and a "decided — do not
+re-litigate" section that will save you rediscovering reasoning that has
+already been settled and paid for.
+
+Update it when you finish something or learn something that changes the
+order. A plan that lives only in one session's head doesn't survive that
+session ending.
+
 ## Where to look
 
 Start by reading `dawbridge/sync.py`'s module docstring and
