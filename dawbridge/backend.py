@@ -40,6 +40,24 @@ class LiveClip:
 
 
 @dataclass
+class LiveMarker:
+    """A marker/memory location observed in a running DAW.
+
+    `bridge_id` is None for markers the bridge has never tagged - local
+    punch-in points and personal scribbles the user made for themselves,
+    which are left strictly alone.
+
+    `native` carries whatever handle that DAW needs to edit this marker
+    again (Reaper's markrgnindexnumber, Pro Tools' memory location
+    number); neither DAW can be told "move the marker called X".
+    """
+    bridge_id: Optional[str]
+    name: str  # base name, bridge tag stripped
+    time_seconds: float
+    native: Any = None
+
+
+@dataclass
 class LiveTrack:
     bridge_id: Optional[str]
     name: str  # base name, bridge tag stripped
@@ -83,6 +101,21 @@ class Backend(ABC):
         push/preview purposes: the preview is only trustworthy if it is
         computed from exactly the same reading the push acts on.
         """
+
+    def read_live_markers(self) -> Optional[list["LiveMarker"]]:
+        """Markers in the running DAW right now, or None.
+
+        None means "this DAW cannot tell me", which is NOT the same as []
+        ("this DAW has no markers"). The difference decides whether the
+        preview may claim anything about markers at all: given [], a
+        preview says every canonical marker will be added; given None it
+        says nothing, because a preview that promises what the push can't
+        deliver is worse than a quiet one.
+
+        Not abstract, and defaults to None, so a backend that hasn't
+        implemented markers is honest rather than broken.
+        """
+        return None
 
     @abstractmethod
     def pull(self, session: Session, store, warnings: Optional[list[str]] = None) -> Session:

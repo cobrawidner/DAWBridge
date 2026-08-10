@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .model import Clip, Session, Track
+from .model import Clip, Marker, Session, Track
 
 
 @dataclass
@@ -70,6 +70,40 @@ def plan_clips(canonical_clips: list[Clip], local_clip_ids: set[str]) -> ClipSyn
         else:
             plan.to_add.append(clip)
     plan.orphaned_ids = sorted(local_clip_ids - canonical_ids)
+    return plan
+
+
+@dataclass
+class MarkerSyncPlan:
+    to_add: list[Marker] = field(default_factory=list)
+    to_update: list[Marker] = field(default_factory=list)  # id matches something live
+    orphaned_ids: list[str] = field(default_factory=list)  # tagged locally, gone from canonical
+
+
+def plan_markers(canonical_markers: list[Marker], local_marker_ids: set[str]) -> MarkerSyncPlan:
+    """Same shape, and the same guarantees, as plan_clips.
+
+    Markers are matched by the bridge id embedded in their DAW-native
+    name, exactly like tracks and clips. Matching on name or position
+    instead would mean the second push adds every marker over again -
+    the -01/-02/-03 duplication failure in a new place - and would break
+    the moment somebody renamed a marker, which is the one thing markers
+    are for.
+
+    `local_marker_ids` holds only TAGGED markers. An untagged marker is
+    local-only content the bridge has never adopted (a punch-in point,
+    somebody's note to themselves); it is never touched and never
+    reported as an orphan.
+    """
+    plan = MarkerSyncPlan()
+    canonical_ids = set()
+    for marker in canonical_markers:
+        canonical_ids.add(marker.id)
+        if marker.id in local_marker_ids:
+            plan.to_update.append(marker)
+        else:
+            plan.to_add.append(marker)
+    plan.orphaned_ids = sorted(local_marker_ids - canonical_ids)
     return plan
 
 
@@ -129,17 +163,35 @@ class TrackChange:
 
 
 @dataclass
+class MarkerChange:
+    """One marker's fate on push. Kept in its own list rather than folded
+    into track_changes: the CLI and GUI index a dict by TrackChange.kind,
+    so an unexpected kind there is a KeyError in the middle of a preview.
+    """
+    name: str
+    kind: str  # "add" | "move" | "rename" | "orphan"
+    from_time: float | None = None
+    to_time: float | None = None
+    detail: str = ""
+
+
+@dataclass
 class PushPreview:
     """What a push would do, without doing any of it."""
     track_changes: list[TrackChange] = field(default_factory=list)
     clip_changes: list[ClipChange] = field(default_factory=list)
+    marker_changes: list[MarkerChange] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     untouched_tracks: int = 0
     untouched_clips: int = 0
 
     @property
     def is_empty(self) -> bool:
-        return not self.track_changes and not self.clip_changes
+        # Markers count. Without them, a push that only moves the chorus
+        # marker reports "nothing to do" and both front ends skip the
+        # push entirely - the change would be previewed and then not
+        # happen.
+        return not self.track_changes and not self.clip_changes and not self.marker_changes
 
     def summary_line(self) -> str:
         creates = sum(1 for t in self.track_changes if t.kind == "create")
@@ -149,6 +201,8 @@ class PushPreview:
         moves = sum(1 for c in self.clip_changes if c.kind == "move")
         reaudio = sum(1 for c in self.clip_changes if c.kind == "reaudio")
         orphans = sum(1 for c in self.clip_changes if c.kind == "orphan")
+        marker_adds = sum(1 for m in self.marker_changes if m.kind == "add")
+        marker_moves = sum(1 for m in self.marker_changes if m.kind in ("move", "rename"))
         parts = []
         if creates: parts.append(f"{creates} new track(s)")
         if renames: parts.append(f"{renames} rename(s)")
@@ -156,11 +210,15 @@ class PushPreview:
         if adds: parts.append(f"{adds} clip(s) added")
         if moves: parts.append(f"{moves} clip(s) moved/resized")
         if reaudio: parts.append(f"{reaudio} clip(s) re-pointed to different audio")
+        if marker_adds: parts.append(f"{marker_adds} marker(s) added")
+        if marker_moves: parts.append(f"{marker_moves} marker(s) moved/renamed")
         if orphans: parts.append(f"{orphans} orphan(s) left alone")
         return ", ".join(parts) if parts else "no changes - the DAW already matches the shared session"
 
 
-def preview_push(canonical: Session, live_tracks: list, target: str = "", store=None) -> PushPreview:
+def preview_push(
+    canonical: Session, live_tracks: list, target: str = "", store=None, live_markers=None
+) -> PushPreview:
     """Diff canonical against what's live in a DAW, without touching it.
 
     Uses the same plan_tracks/plan_clips decisions the real push uses, so
@@ -171,6 +229,11 @@ def preview_push(canonical: Session, live_tracks: list, target: str = "", store=
     items natively, so warning about them there is pure noise). `store`,
     when given, is used to check real audio durations so a loop warning
     only fires when the clip genuinely repeats its source.
+
+    `live_markers` is the backend's read_live_markers() result: a list,
+    or None when that DAW can't report markers. None means no marker
+    lines at all rather than "everything is missing" - see
+    Backend.read_live_markers.
     """
     preview = PushPreview()
     live_by_id = {t.bridge_id: t for t in live_tracks if t.bridge_id}
@@ -246,6 +309,8 @@ def preview_push(canonical: Session, live_tracks: list, target: str = "", store=
         if not changed_here:
             preview.untouched_tracks += 1
 
+    _preview_markers(preview, canonical, live_markers)
+
     # A clip whose audio isn't in the shared folder is about to become a
     # silent item on someone's timeline, so say it before the push, not
     # after. Reported for the clips the push would actually place: an
@@ -286,6 +351,44 @@ def preview_push(canonical: Session, live_tracks: list, target: str = "", store=
                 )
 
     return preview
+
+
+def _preview_markers(preview: PushPreview, canonical: Session, live_markers) -> None:
+    """Marker half of the diff, using the same plan the push will use.
+
+    Silent when live_markers is None: that means the DAW couldn't tell us
+    what it has, and a preview may not claim a change it can't stand
+    behind.
+    """
+    if live_markers is None:
+        return
+
+    live_by_id = {m.bridge_id: m for m in live_markers if m.bridge_id}
+    plan = plan_markers(canonical.markers, set(live_by_id))
+
+    for marker in plan.to_add:
+        preview.marker_changes.append(
+            MarkerChange(name=marker.name, kind="add", to_time=marker.time_seconds)
+        )
+
+    for marker in plan.to_update:
+        live = live_by_id[marker.id]
+        if abs(live.time_seconds - marker.time_seconds) > _MOVE_TOLERANCE_SECONDS:
+            preview.marker_changes.append(
+                MarkerChange(name=marker.name, kind="move",
+                             from_time=live.time_seconds, to_time=marker.time_seconds)
+            )
+        elif live.name != marker.name:
+            preview.marker_changes.append(
+                MarkerChange(name=marker.name, kind="rename",
+                             detail=f"{live.name!r} -> {marker.name!r}")
+            )
+
+    for orphan_id in plan.orphaned_ids:
+        orphan = live_by_id.get(orphan_id)
+        preview.marker_changes.append(
+            MarkerChange(name=orphan.name if orphan else orphan_id, kind="orphan")
+        )
 
 
 #: Beyond this many missing-audio lines, the list stops being readable

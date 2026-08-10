@@ -41,6 +41,17 @@ from .store import SharedSessionMoved, SharedStore
 from .sync import find_overlapping_clips, preview_push
 
 
+def _at(seconds: float | None) -> str:
+    """A marker position, or "?" when the DAW couldn't report one.
+
+    Markers legitimately carry a missing time - a marker in a Pro Tools
+    session whose unit couldn't be resolved is reported rather than
+    guessed at - and a format string blowing up mid-preview would take
+    the whole listing with it.
+    """
+    return "?" if seconds is None else f"{seconds:.3f}s"
+
+
 def _print_preview(preview, session, folder: Path, daw: str) -> None:
     """Render a PushPreview for a human deciding whether to go ahead."""
     print(f"[dawbridge] shared session r{session.revision}, last updated by "
@@ -76,6 +87,20 @@ def _print_preview(preview, session, folder: Path, daw: str) -> None:
                 print(f"    AUDIO   [{cc.track_name}] {cc.clip_name}: now points to different audio")
             else:
                 print(f"    ORPHAN  [{cc.track_name}] {cc.clip_name} "
+                      f"- in your DAW but not in the shared session; left alone")
+
+    if preview.marker_changes:
+        print("\n  markers:")
+        for mc in preview.marker_changes:
+            if mc.kind == "add":
+                print(f"    ADD     {mc.name} @ {_at(mc.to_time)}")
+            elif mc.kind == "move":
+                print(f"    MOVE    {mc.name}: {_at(mc.from_time)} -> {_at(mc.to_time)}")
+            elif mc.kind == "rename":
+                detail = f" - {mc.detail}" if mc.detail else ""
+                print(f"    RENAME  {mc.name}{detail}")
+            else:
+                print(f"    ORPHAN  {mc.name} @ {_at(mc.from_time)} "
                       f"- in your DAW but not in the shared session; left alone")
 
     if preview.untouched_tracks or preview.untouched_clips:
@@ -185,7 +210,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
         return 1
 
     session = store.load()
-    preview = preview_push(session, backend.read_live_state(), target=args.daw, store=store)
+    preview = preview_push(session, backend.read_live_state(), target=args.daw, store=store,
+                            live_markers=backend.read_live_markers())
     _print_preview(preview, session, Path(args.folder), args.daw)
     return 0
 
@@ -206,7 +232,8 @@ def cmd_load(args: argparse.Namespace) -> int:
     # Always show what's about to happen. A push writes into a real
     # project someone may have spent hours on; "here's the diff" costs one
     # read and is the difference between a surprise and a decision.
-    preview = preview_push(session, backend.read_live_state(), target=args.daw, store=store)
+    preview = preview_push(session, backend.read_live_state(), target=args.daw, store=store,
+                            live_markers=backend.read_live_markers())
     _print_preview(preview, session, Path(args.folder), args.daw)
     project = backend.project_identity()
     project_change = syncstate.describe_project_change(Path(args.folder), args.daw, project)

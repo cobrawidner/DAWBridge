@@ -67,9 +67,22 @@ KNOWN GAP: automation curves are not exposed by PTSL as of this writing
 this backend does not attempt to read or write automation. See the
 feasibility notes for what that means for scope.
 
-KNOWN GAP: markers/memory locations are not yet synced by this backend
-(Session.markers exists in the schema and `dawbridge status` displays
-them, but neither backend reads or writes them yet).
+MARKERS: memory locations ARE exposed properly - `get_memory_locations()`
+returns structured messages and `create_memory_location()` /
+`edit_memory_location()` write them, so this backend reads and writes
+markers. The one thing PTSL does NOT say is what unit a location's
+position string is in: `CreateMemoryLocationRequestBody` has no
+time-type field at all (verified against the installed protobufs),
+unlike `SpotClipsByID` and `set_timeline_selection`, which both take an
+explicit `TimelineLocationType`. So the position is in whatever format
+the session happens to be displaying, and nothing in the message says
+which. Reading therefore converts only the formats that round-trip
+exactly (samples, min:secs) and skips the rest out loud; writing copies
+the format from a location Pro Tools itself wrote, and if there isn't
+one, writes nothing and says so with the positions listed. Guessing
+would put every marker at a confidently wrong position, and a
+misplaced marker looks exactly like a correct one. NOT verified against
+a live Pro Tools - see the report accompanying this change.
 
 KNOWN CAVEAT: the text-export clip-name column is a fixed display width;
 a very long tagged clip name could in principle be truncated in the
@@ -88,8 +101,8 @@ import re
 from pathlib import Path
 
 from . import audiofile
-from .backend import Backend, LiveClip, LiveTrack
-from .model import Clip, Session, Track, new_id
+from .backend import Backend, LiveClip, LiveMarker, LiveTrack
+from .model import Clip, Marker, Session, Track, new_id
 from .sync import (
     claim_live_id,
     describe_dropped_tracks,
@@ -99,6 +112,7 @@ from .sync import (
     find_overlapping_clips,
     merge_pulled_track,
     plan_clips,
+    plan_markers,
     plan_tracks,
     renumber_tracks,
 )
@@ -170,6 +184,219 @@ class ProToolsBackend(Backend):
                 )
             )
         return live
+
+    # ---- markers (Pro Tools memory locations) ---------------------------
+
+    def read_live_markers(self) -> list[LiveMarker] | None:
+        from ptsl import open_engine
+
+        with open_engine(company_name=_COMPANY, application_name=_APP) as engine:
+            return self._read_live_markers(engine)
+
+    def _read_live_markers(self, engine, warnings: list[str] | None = None) -> list[LiveMarker] | None:
+        """Memory locations that are markers, as LiveMarkers, or None if
+        Pro Tools can't be asked.
+
+        PTSL does expose these properly (get_memory_locations returns
+        structured messages, not display text), so unlike clips there's
+        no text export to parse. What it does NOT expose is the unit of
+        the position string - see _pt_time_style. A location whose
+        position can't be converted exactly is dropped WITH a warning
+        rather than converted approximately.
+        """
+        from ptsl.PTSL_pb2 import TimeProperties
+
+        try:
+            locations = engine.get_memory_locations()
+            sample_rate = int(engine.session_sample_rate())
+        except Exception as exc:
+            if warnings is not None:
+                warnings.append(f"could not read Pro Tools' memory locations ({exc})")
+            return None
+
+        markers: list[LiveMarker] = []
+        unconvertible: list[str] = []
+        for location in locations:
+            # A memory location can be a marker, a selection (a range) or
+            # neither. Only a marker is a point in time, which is all the
+            # schema can hold.
+            if location.time_properties != TimeProperties.TP_Marker:
+                continue
+            seconds = _parse_pt_time(location.start_time, sample_rate)
+            if seconds is None:
+                unconvertible.append(f"{location.name!r} at {location.start_time!r}")
+                continue
+            base_name, bridge_id = parse_tag(location.name)
+            markers.append(
+                LiveMarker(bridge_id=bridge_id, name=base_name,
+                           time_seconds=seconds, native=location.number)
+            )
+
+        if unconvertible and warnings is not None:
+            warnings.append(
+                f"{len(unconvertible)} Pro Tools memory location(s) report their position in a "
+                f"format DAWBridge cannot convert exactly ({', '.join(unconvertible[:3])}"
+                f"{', ...' if len(unconvertible) > 3 else ''}). Set Pro Tools' main counter to "
+                f"Min:Secs or Samples and pull again - they were left out rather than published "
+                f"at an approximate position"
+            )
+        return markers
+
+    def _marker_write_style(self, engine, markers: list[LiveMarker]) -> str | None:
+        """Which position format to write memory locations in, learned
+        from one Pro Tools already has, or None if we can't tell.
+
+        Nothing in PTSL states the unit, and there is no safe way to
+        find out by experiment: a wrongly-placed marker can only be
+        removed with clear_all_memory_locations, which would take the
+        user's own markers with it. So the format is copied from a
+        location Pro Tools itself wrote, and if there isn't one, nothing
+        is written.
+        """
+        try:
+            for location in engine.get_memory_locations():
+                style = _pt_time_style(location.start_time)
+                if style:
+                    return style
+        except Exception:
+            return None
+        return None
+
+    def _push_markers(self, engine, session: Session, warnings: list[str]) -> None:
+        from ptsl.PTSL_pb2 import MemoryLocationReference, TimeProperties
+
+        live = self._read_live_markers(engine, warnings)
+        if live is None:
+            return
+        live_by_id = {m.bridge_id: m for m in live if m.bridge_id}
+        plan = plan_markers(session.markers, set(live_by_id))
+
+        if not plan.to_add and not plan.to_update:
+            for orphan_id in plan.orphaned_ids:
+                orphan = live_by_id.get(orphan_id)
+                warnings.append(
+                    f"marker {orphan.name if orphan else orphan_id!r} is in Pro Tools but no "
+                    f"longer in the shared session; left in place, review manually"
+                )
+            return
+
+        style = self._marker_write_style(engine, live)
+        sample_rate = int(engine.session_sample_rate())
+        if style is None:
+            # The honest outcome. Listing the positions makes it a minute
+            # of manual work instead of a mystery.
+            wanted = ", ".join(
+                f"{m.name!r} at {_format_pt_time(m.time_seconds, 'minsecs', sample_rate)}"
+                for m in (plan.to_add + plan.to_update)[:12]
+            )
+            warnings.append(
+                f"{len(plan.to_add) + len(plan.to_update)} marker(s) were NOT written into Pro "
+                f"Tools. Its scripting API takes a memory location's position as a plain string "
+                f"with no unit attached, and this session has no existing marker to copy the "
+                f"format from - writing one would be a guess, and a marker in the wrong place "
+                f"looks exactly like a marker in the right place. Add any one marker by hand and "
+                f"push again and the rest will follow, or place these yourself: {wanted}"
+            )
+            return
+
+        for marker in plan.to_add:
+            start = _format_pt_time(marker.time_seconds, style, sample_rate)
+            if start is None:
+                warnings.append(f"marker {marker.name!r} could not be positioned in Pro Tools; skipped")
+                continue
+            try:
+                engine.create_memory_location(
+                    start_time=start,
+                    name=tag(marker.name, marker.id),
+                    time_properties=TimeProperties.TP_Marker,
+                    reference=MemoryLocationReference.MLR_Absolute,
+                )
+            except Exception as exc:
+                warnings.append(f"marker {marker.name!r} failed to create in Pro Tools: {exc}; skipped")
+
+        for marker in plan.to_update:
+            existing = live_by_id[marker.id]
+            start = _format_pt_time(marker.time_seconds, style, sample_rate)
+            if start is None:
+                continue
+            try:
+                engine.edit_memory_location(
+                    location_number=existing.native,
+                    name=tag(marker.name, marker.id),
+                    start_time=start,
+                    end_time=start,
+                    time_properties=TimeProperties.TP_Marker,
+                    reference=MemoryLocationReference.MLR_Absolute,
+                    general_properties=None,
+                    comments="",
+                )
+            except Exception as exc:
+                warnings.append(f"marker {marker.name!r} failed to move in Pro Tools: {exc}; skipped")
+
+        for orphan_id in plan.orphaned_ids:
+            orphan = live_by_id.get(orphan_id)
+            warnings.append(
+                f"marker {orphan.name if orphan else orphan_id!r} is in Pro Tools but no longer "
+                f"in the shared session; left in place, review manually"
+            )
+
+    def _pull_markers(self, engine, session: Session, warnings: list[str]) -> None:
+        live = self._read_live_markers(engine, warnings)
+        if live is None:
+            return
+
+        markers_before = list(session.markers)
+        pulled: list[Marker] = []
+        claimed: set[str] = set()
+
+        for observed in live:
+            bridge_id = claim_live_id(observed.bridge_id, claimed)
+            if observed.bridge_id and bridge_id is None:
+                warnings.append(duplicate_adoption_warning("marker", observed.name, observed.bridge_id))
+
+            existing = next((m for m in session.markers if m.id == bridge_id), None) if bridge_id else None
+            if existing is not None:
+                existing.name = observed.name
+                existing.time_seconds = observed.time_seconds
+                pulled.append(existing)
+                continue
+
+            marker = Marker(id=bridge_id or new_id(), name=observed.name,
+                            time_seconds=observed.time_seconds)
+            pulled.append(marker)
+            if bridge_id is None:
+                # Adopt: stamp the id into the name, same as tracks and
+                # clips, so the next pull recognises it instead of
+                # minting a second copy.
+                try:
+                    engine.edit_memory_location(
+                        location_number=observed.native,
+                        name=tag(marker.name, marker.id),
+                        start_time=_format_pt_time(
+                            observed.time_seconds, "samples", int(engine.session_sample_rate())
+                        ),
+                        end_time="",
+                        time_properties=None,
+                        reference=None,
+                        general_properties=None,
+                        comments="",
+                    )
+                except Exception as exc:
+                    warnings.append(
+                        f"marker {marker.name!r} could not be tagged in Pro Tools ({exc}), so the "
+                        f"next pull will treat it as a new marker and your partner will collect a "
+                        f"duplicate - rename it by hand to {tag(marker.name, marker.id)!r}"
+                    )
+
+        session.markers = pulled
+
+        lost = [m.name for m in markers_before if m.id not in {x.id for x in pulled}]
+        if lost:
+            warnings.append(
+                f"{len(lost)} marker(s) in the shared session are not in this Pro Tools session "
+                f"and this publish removes them ({', '.join(repr(n) for n in lost[:5])}"
+                f"{', ...' if len(lost) > 5 else ''})"
+            )
 
     # ---- pull: live Pro Tools session -> canonical Session --------------
 
@@ -302,6 +529,11 @@ class ProToolsBackend(Backend):
         # Track.order only becomes meaningful here, with the list in
         # Pro Tools' own order - see sync.renumber_tracks.
         renumber_tracks(session.tracks)
+
+        try:
+            self._pull_markers(engine, session, warnings)
+        except Exception as exc:
+            warnings.append(f"markers could not be read from Pro Tools ({exc}); none were published")
 
         # Publishing replaces the shared session's track list; say what
         # that removes before the person who owns it finds out the hard
@@ -683,6 +915,14 @@ class ProToolsBackend(Backend):
                 except Exception as exc:
                     warnings.append(f"track {track.name!r} failed to update in Pro Tools: {exc}; skipped")
 
+            try:
+                self._push_markers(engine, session, warnings)
+            except Exception as exc:
+                warnings.append(
+                    f"markers could not be written into Pro Tools ({exc}); the tracks and clips "
+                    f"in this push were applied, the markers were not"
+                )
+
             # Same reasoning as pull(): tags stamped on newly-created
             # tracks/clips only live in-memory until saved.
             engine.save_session()
@@ -996,6 +1236,67 @@ class ProToolsBackend(Backend):
             engine.trim_to_selection()
         except Exception:
             pass
+
+
+#: Pro Tools reports and accepts a memory location's position as a bare
+#: string - CreateMemoryLocationRequestBody has no time-type field at all
+#: (verified against the installed py-ptsl protobufs), unlike
+#: SpotClipsByID and set_timeline_selection which both take an explicit
+#: TimelineLocationType. So the unit is whatever the session is currently
+#: displaying, and nothing in the message says which. These recognise the
+#: formats that can be read back exactly; anything else is refused rather
+#: than guessed, because a misread unit puts every marker at a confidently
+#: wrong position, which is the failure this whole codebase keeps being
+#: bitten by.
+_PT_SAMPLES_RE = re.compile(r"^\d+$")
+_PT_MINSECS_RE = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2}(?:\.\d+)?)$")
+
+
+def _pt_time_style(text: str) -> str | None:
+    """"samples" | "minsecs" for a position string we can convert exactly,
+    else None (timecode, bars|beats, feet+frames, or anything unfamiliar).
+
+    Timecode is deliberately not in the list even though it looks
+    parseable: it is quantised to whole frames, and rounding a position
+    to the nearest frame is exactly the bug that was already found and
+    fixed once on the clip path.
+    """
+    text = (text or "").strip()
+    if _PT_SAMPLES_RE.match(text):
+        return "samples"
+    if _PT_MINSECS_RE.match(text):
+        return "minsecs"
+    return None
+
+
+def _parse_pt_time(text: str, sample_rate: int) -> float | None:
+    """Position string -> seconds, or None if the format isn't one we can
+    convert without guessing.
+    """
+    text = (text or "").strip()
+    style = _pt_time_style(text)
+    if style == "samples":
+        return int(text) / float(sample_rate) if sample_rate else None
+    if style == "minsecs":
+        hours, minutes, seconds = _PT_MINSECS_RE.match(text).groups()
+        return int(hours or 0) * 3600 + int(minutes) * 60 + float(seconds)
+    return None
+
+
+def _format_pt_time(seconds: float, style: str, sample_rate: int) -> str | None:
+    """Seconds -> a position string in `style`, or None if we can't.
+
+    The inverse of _parse_pt_time, and only for styles that round-trip
+    exactly - see _pt_time_style.
+    """
+    if seconds < 0:
+        return None
+    if style == "samples":
+        return str(int(round(seconds * sample_rate))) if sample_rate else None
+    if style == "minsecs":
+        minutes, remainder = divmod(float(seconds), 60)
+        return f"{int(minutes)}:{remainder:06.3f}"
+    return None
 
 
 def _clip_bucket_key(track_name: str) -> str:

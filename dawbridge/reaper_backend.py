@@ -19,10 +19,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .backend import Backend, LiveClip, LiveTrack
-from .model import Clip, Session, Track, new_id
+from .backend import Backend, LiveClip, LiveMarker, LiveTrack
+from .model import Clip, Marker, Session, Track, new_id
 from .sync import (
     claim_live_id,
+    plan_markers,
     describe_dropped_tracks,
     describe_meter_mismatch,
     describe_publish_sample_rate_change,
@@ -37,6 +38,38 @@ from .sync import (
     should_reimport_audio,
 )
 from .tagging import parse_tag, strip_tag, tag
+
+
+#: EnumProjectMarkers2 fills out-parameters, and reapy's wrapper returns
+#: them as a tuple. Which slot holds what depends on whether that version
+#: prepends the C return value - this file's module docstring already
+#: warns that reapy's buffer-style conventions differ by version, and
+#: guessing wrong here would read a marker's position out of the field
+#: holding its region end, i.e. put every marker at 0.
+#: (retval, proj, idx, isrgn, pos, rgnend, name, markrgnindexnumber)
+_MARKER_ROW_LAYOUTS = ((3, 4, 6, 7), (2, 3, 5, 6))
+
+
+def _decode_marker_row(row) -> tuple[bool, float, str, int] | None:
+    """(is_region, position_seconds, name, marker_index) from one
+    EnumProjectMarkers2 row, or None if the row makes no sense.
+
+    Picks the layout by checking the shape of what it finds rather than
+    trusting the length alone: the name field must be a string and the
+    position a number. A row that matches neither layout is skipped by
+    the caller with a warning, because a misread marker is worse than a
+    missing one.
+    """
+    for isrgn_at, pos_at, name_at, index_at in _MARKER_ROW_LAYOUTS:
+        if len(row) <= index_at:
+            continue
+        name, position = row[name_at], row[pos_at]
+        if isinstance(name, str) and isinstance(position, (int, float)) and not isinstance(position, bool):
+            try:
+                return bool(row[isrgn_at]), float(position), name, int(row[index_at])
+            except (TypeError, ValueError):
+                continue
+    return None
 
 
 def _import_audio(store, source_path: str, warnings=None, clip_name: str = "", track_name: str = "") -> str:
@@ -137,6 +170,130 @@ class ReaperBackend(Backend):
             )
         return live
 
+    # ---- markers -------------------------------------------------------
+
+    def read_live_markers(
+        self, warnings: list[str] | None = None, for_publish: bool = False
+    ) -> list[LiveMarker]:
+        """Project markers, tagged and untagged. Regions are deliberately
+        not included - the schema models a marker as a point in time and
+        has nowhere to put a region's end, so publishing one would round
+        it to its start and silently destroy the range.
+
+        `for_publish` gates the regions warning to the pull path, where
+        it's true that they aren't crossing the bridge. Repeating it on
+        every push would be noise about something that push isn't doing,
+        and a warning people learn to skim is worse than none.
+        """
+        from reapy import reascript_api as RPR
+
+        _retval, _proj, n_markers, n_regions = RPR.CountProjectMarkers(0, 0, 0)
+        markers: list[LiveMarker] = []
+        regions = 0
+        unreadable = 0
+
+        for index in range(int(n_markers) + int(n_regions)):
+            decoded = _decode_marker_row(RPR.EnumProjectMarkers2(0, index, 0, 0, 0, "", 0))
+            if decoded is None:
+                unreadable += 1
+                continue
+            is_region, position, raw_name, marker_index = decoded
+            if is_region:
+                regions += 1
+                continue
+            base_name, bridge_id = parse_tag(raw_name)
+            markers.append(
+                LiveMarker(bridge_id=bridge_id, name=base_name,
+                           time_seconds=position, native=marker_index)
+            )
+
+        if warnings is not None and for_publish and regions:
+            warnings.append(
+                f"this project has {regions} region(s), which DAWBridge does not sync - the "
+                f"shared session models a marker as a single point and has nowhere to keep a "
+                f"region's end, so publishing one would quietly flatten it to its start. "
+                f"Markers cross the bridge; regions stay put"
+            )
+        if warnings is not None and unreadable:
+            warnings.append(
+                f"{unreadable} marker(s) could not be read from Reaper (unrecognised ReaScript "
+                f"reply) and were left out of the publish rather than published at a guessed "
+                f"position"
+            )
+        return markers
+
+    def _pull_markers(self, session: Session, warnings: list[str]) -> None:
+        """Replace canonical's marker list with what's in Reaper now.
+
+        Wholesale, like tracks and clips - see sync.py's docstring. An
+        untagged marker is adopted (stamped with a new id) so the next
+        pull recognises it instead of adding a second copy.
+        """
+        from reapy import reascript_api as RPR
+
+        markers_before = list(session.markers)
+        pulled: list[Marker] = []
+        claimed: set[str] = set()
+
+        for live in self.read_live_markers(warnings, for_publish=True):
+            bridge_id = claim_live_id(live.bridge_id, claimed)
+            if live.bridge_id and bridge_id is None:
+                warnings.append(duplicate_adoption_warning("marker", live.name, live.bridge_id))
+
+            existing = next((m for m in session.markers if m.id == bridge_id), None) if bridge_id else None
+            if existing is not None:
+                existing.name = live.name
+                existing.time_seconds = live.time_seconds
+                pulled.append(existing)
+                continue
+
+            marker = Marker(id=bridge_id or new_id(), name=live.name, time_seconds=live.time_seconds)
+            pulled.append(marker)
+            if live.bridge_id is None or bridge_id is None:
+                # Adopt it: stamp the id into the name so it's recognised
+                # next time. Same reasoning as tracks and clips - without
+                # this every pull would mint a new id and the other DAW
+                # would collect a duplicate marker per sync.
+                RPR.SetProjectMarker2(
+                    0, live.native, False, live.time_seconds, 0, tag(marker.name, marker.id)
+                )
+
+        session.markers = pulled
+
+        lost = [m.name for m in markers_before if m.id not in {x.id for x in pulled}]
+        if lost:
+            warnings.append(
+                f"{len(lost)} marker(s) in the shared session are not in this project and this "
+                f"publish removes them ({', '.join(repr(n) for n in lost[:5])}"
+                f"{', ...' if len(lost) > 5 else ''})"
+            )
+
+    def _push_markers(self, session: Session, warnings: list[str]) -> None:
+        """Apply canonical's markers into Reaper. Never deletes."""
+        from reapy import reascript_api as RPR
+
+        live = self.read_live_markers(warnings)
+        live_by_id = {m.bridge_id: m for m in live if m.bridge_id}
+        plan = plan_markers(session.markers, set(live_by_id))
+
+        for marker in plan.to_add:
+            RPR.AddProjectMarker2(
+                0, False, marker.time_seconds, 0, tag(marker.name, marker.id), -1, 0
+            )
+
+        for marker in plan.to_update:
+            existing = live_by_id[marker.id]
+            RPR.SetProjectMarker2(
+                0, existing.native, False, marker.time_seconds, 0, tag(marker.name, marker.id)
+            )
+
+        for orphan_id in plan.orphaned_ids:
+            orphan = live_by_id.get(orphan_id)
+            warnings.append(
+                f"marker {orphan.name if orphan else orphan_id!r} is in your Reaper project but "
+                f"no longer in the shared session; left in place, review manually"
+            )
+
     # ---- pull: live Reaper project -> canonical Session ----------------
 
     def pull(self, session: Session, store, warnings: list[str] | None = None) -> Session:
@@ -223,6 +380,13 @@ class ReaperBackend(Backend):
         # Track.order is what `dawbridge status` and the GUI sort by; it
         # only becomes true here, once the list is in Reaper's order.
         renumber_tracks(session.tracks)
+
+        try:
+            self._pull_markers(session, warnings)
+        except Exception as exc:
+            # Markers are worth having but not worth losing a publish
+            # over - the tracks and clips in hand are the valuable part.
+            warnings.append(f"markers could not be read from Reaper ({exc}); none were published")
 
         # Publishing replaces the shared session's track list. Say which
         # tracks that removes, before the person who owns them finds out
@@ -390,6 +554,14 @@ class ReaperBackend(Backend):
                 )
             native_track.is_muted = track.muted
             self._push_clips(native_track, track, store, warnings)
+
+        try:
+            self._push_markers(session, warnings)
+        except Exception as exc:
+            warnings.append(
+                f"markers could not be written into Reaper ({exc}); the tracks and clips in this "
+                f"push were applied, the markers were not"
+            )
 
         # Items created through the API don't get peak files built the way
         # a manual import/drag does, so pushed clips render as empty

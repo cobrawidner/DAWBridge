@@ -351,6 +351,18 @@ class DawBridgeGUI(ttk.Frame):
                 lines.append(f"    AUDIO   [{cc.track_name}] {cc.clip_name}: different audio file")
             else:
                 lines.append(f"    ORPHAN  [{cc.track_name}] {cc.clip_name} - left alone")
+        for mc in preview.marker_changes:
+            at = lambda s: "?" if s is None else f"{s:.3f}s"  # noqa: E731 - see cli._at
+            if mc.kind == "add":
+                lines.append(f"    ADD     marker {mc.name} @ {at(mc.to_time)}")
+            elif mc.kind == "move":
+                lines.append(f"    MOVE    marker {mc.name}: {at(mc.from_time)} -> {at(mc.to_time)}")
+            elif mc.kind == "rename":
+                lines.append(f"    RENAME  marker {mc.name}"
+                             + (f" - {mc.detail}" if mc.detail else ""))
+            else:
+                lines.append(f"    ORPHAN  marker {mc.name} @ {at(mc.from_time)} - left alone")
+
         if preview.untouched_tracks or preview.untouched_clips:
             lines.append(f"    unchanged: {preview.untouched_tracks} track(s), "
                          f"{preview.untouched_clips} clip(s)")
@@ -371,7 +383,8 @@ class DawBridgeGUI(ttk.Frame):
             return
 
         session = store.load()
-        preview = preview_push(session, backend.read_live_state(), target=daw, store=store)
+        preview = preview_push(session, backend.read_live_state(), target=daw, store=store,
+                                live_markers=backend.read_live_markers())
         for line in self._describe_preview(preview, session, folder, daw):
             self.master.after(0, lambda line=line: self._log(line))
 
@@ -499,7 +512,8 @@ class DawBridgeGUI(ttk.Frame):
         # project. The confirm dialog has to run on the Tk main thread, so
         # hand it over and wait for the answer rather than calling it here.
         project = backend.project_identity()
-        preview = preview_push(session, backend.read_live_state(), target=daw, store=store)
+        preview = preview_push(session, backend.read_live_state(), target=daw, store=store,
+                                live_markers=backend.read_live_markers())
         for line in self._describe_preview(preview, session, folder, daw):
             self.master.after(0, lambda line=line: self._log(line))
 
