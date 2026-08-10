@@ -67,24 +67,19 @@ False only when Reaper isn't running - that is not a setup problem.
    `write_to_daw`, or `capture` / `apply`. Four call sites in `cli.py` and
    `gui.py` belong to the main session and get wired once the names are chosen.
 
-2. **Recovery is unreachable from the `.exe`** *(main session)*. `doctor`,
-   `history` and `restore` are CLI-only, and the person most likely to need
-   them is the non-technical collaborator, who has no Python. The 20-revision
-   archive is only a safety net for someone who can reach it.
-
-4. **No preview for the publish direction** *(main session)*. `preview` only
+2. **No preview for the publish direction** *(main session)*. `preview` only
    describes what a pull would change in your DAW. Before publishing —
    the destructive direction — there is nothing that shows what you're about
    to overwrite.
 
-5. **`Session.name` is never captured.** Every session reads `'Untitled'`
+3. **`Session.name` is never captured.** Every session reads `'Untitled'`
    in the status pane. Small, cosmetic, visible constantly.
 
-6. **Fidelity gaps still open** *(dawbridge-collab)*. Time signature is
+4. **Fidelity gaps still open** *(dawbridge-collab)*. Time signature is
    captured and never applied anywhere. Fades aren't read on the Pro Tools
    side. See the field-fidelity table in the audit reports.
 
-7. **Audio-reference asymmetry.** Reaper references audio directly in the
+5. **Audio-reference asymmetry.** Reaper references audio directly in the
    Dropbox folder; Pro Tools copies into its own session folder. So a Reaper
    project breaks if the folder moves, and Reaper writes peak files into the
    shared folder. Needs a decision, not a fix.
@@ -141,6 +136,6 @@ Recorded so nobody spends a session rediscovering the reasoning.
 - **Size work to survive being cut off.** Three agent runs have been killed
   mid-task by API session limits. Settle and record one question at a time
   rather than doing all the setup and leaving the answers to the end.
-- **The full suite runs with no DAW open** — 195 tests at time of writing. So
+- **The full suite runs with no DAW open** — 209 tests at time of writing. So
   most work here is possible from a cloud checkout; only live verification
   isn't.
