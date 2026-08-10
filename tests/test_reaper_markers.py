@@ -60,3 +60,85 @@ def test_an_integer_position_is_accepted():
     # ReaScript hands back doubles, but a wrapper that rounds a whole
     # number to int must not make the row unreadable.
     assert _decode_marker_row((1, 0, 0, False, 8, 0.0, "Bridge", 2)) == (False, 8.0, "Bridge", 2)
+
+
+class _FakeRPR:
+    """Just the marker calls, shaped like the real reapy replies."""
+
+    def __init__(self, rows, n_markers, n_regions=0):
+        self._rows, self._n = rows, (n_markers, n_regions)
+
+    def CountProjectMarkers(self, *_a):
+        return [0, 0, self._n[0], self._n[1]]
+
+    def EnumProjectMarkers2(self, _proj, idx, *_a):
+        return self._rows[idx]
+
+
+def _backend_with(rpr, monkeypatch):
+    import sys
+    import types
+
+    from dawbridge.reaper_backend import ReaperBackend
+
+    fake = types.ModuleType("reapy")
+    fake.reascript_api = rpr
+    monkeypatch.setitem(sys.modules, "reapy", fake)
+    return ReaperBackend()
+
+
+def test_markers_without_names_are_refused_rather_than_published(monkeypatch):
+    """CONFIRMED BY LIVE TEST against Reaper 7.69 + reapy.
+
+    The name out-parameter of EnumProjectMarkers2 is never populated over
+    reapy's remote API - it echoes back whatever buffer is passed, for
+    EnumProjectMarkers/2/3 alike, and inside an inside_reaper() block too.
+    Numeric out-params are fine; string ones only work where the call
+    takes an explicit buffer SIZE, which these don't.
+
+    Identity lives in the name, so nameless markers have no bridge tag:
+    every pull would adopt them afresh, mint new ids and hand the partner
+    a duplicate set on every sync. Returning None ("can't read markers")
+    stops that before it starts.
+    """
+    rows = [
+        [1, 0, 0, 0, 12.5, 0.0, "", 1],
+        [2, 0, 1, 0, 32.0, 0.0, "", 2],
+    ]
+    backend = _backend_with(_FakeRPR(rows, n_markers=2), monkeypatch)
+    warnings: list[str] = []
+
+    assert backend.read_live_markers(warnings) is None
+    assert len(warnings) == 1
+    assert "no names" in warnings[0]
+    assert "Tracks and clips are unaffected" in warnings[0]
+
+
+def test_named_markers_are_read_normally(monkeypatch):
+    rows = [
+        [1, 0, 0, 0, 12.5, 0.0, "Verse #22222222", 1],
+        [2, 0, 1, 1, 40.0, 48.0, "A region", 2],
+    ]
+    backend = _backend_with(_FakeRPR(rows, n_markers=1, n_regions=1), monkeypatch)
+    warnings: list[str] = []
+
+    markers = backend.read_live_markers(warnings, for_publish=True)
+
+    assert [(m.name, m.bridge_id, m.time_seconds) for m in markers] == [
+        ("Verse", "22222222", 12.5)
+    ], "the region must be left out - the schema has nowhere to put its end"
+    assert any("region" in w for w in warnings)
+
+
+def test_a_single_genuinely_unnamed_marker_does_not_disable_the_feature(monkeypatch):
+    # Reaper lets you make an unnamed marker. That must not read as "the
+    # API is broken" while other markers still carry their names.
+    rows = [
+        [1, 0, 0, 0, 4.0, 0.0, "", 1],
+        [2, 0, 1, 0, 12.5, 0.0, "Verse #22222222", 2],
+    ]
+    backend = _backend_with(_FakeRPR(rows, n_markers=2), monkeypatch)
+
+    markers = backend.read_live_markers([])
+
+    assert markers is not None and len(markers) == 2

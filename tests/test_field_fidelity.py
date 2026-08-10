@@ -144,3 +144,42 @@ def test_reimport_stays_quiet_without_a_source_path_or_store(tmp_path):
     clip = Clip.new(name="Vox", audio_file="x.wav", start_seconds=0, length_seconds=1)
     assert not should_reimport_audio("", clip, store)
     assert not should_reimport_audio(r"D:\project\vox.wav", clip, None)
+
+
+# ---- tempo writes, which move everything already in the project -------
+
+def test_tempo_is_only_written_into_an_empty_project():
+    """CONFIRMED BY LIVE TEST against Reaper 7.69.
+
+    SetCurrentBPM drags every beat-attached object with it. Measured: an
+    item at 5.333s with a 0.333s fade became 4.000s / 0.250s when the
+    tempo went 90 -> 120, and back again on the way down. Position,
+    length and fades all scale with the tempo ratio.
+
+    Canonical stores SECONDS, so the shipping push - which called
+    SetCurrentBPM whenever the tempos differed - silently relocated the
+    user's existing arrangement and then placed the pushed clips at
+    canonical's seconds positions, leaving the project wrong relative to
+    itself and propagating the shift on the next pull.
+    """
+    from dawbridge.sync import describe_tempo_write_refusal, tempo_write_is_safe
+
+    assert tempo_write_is_safe(item_count=0), "a fresh project has nothing to drag"
+    assert not tempo_write_is_safe(item_count=1)
+
+
+def test_a_refused_tempo_change_is_explained():
+    from dawbridge.sync import describe_tempo_write_refusal
+
+    note = describe_tempo_write_refusal(Session(tempo_bpm=94.0), live_tempo=120.0, item_count=12)
+
+    assert note is not None
+    assert "94" in note and "120" in note
+    assert "did NOT change it" in note
+
+
+def test_no_tempo_warning_when_the_project_is_empty_or_already_agrees():
+    from dawbridge.sync import describe_tempo_write_refusal
+
+    assert describe_tempo_write_refusal(Session(tempo_bpm=94.0), 120.0, item_count=0) is None
+    assert describe_tempo_write_refusal(Session(tempo_bpm=120.0), 120.0, item_count=9) is None

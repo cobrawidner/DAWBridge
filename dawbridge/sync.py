@@ -619,6 +619,48 @@ def describe_sample_rate_mismatch(session: Session, daw_rate: int | None, daw: s
     )
 
 
+def tempo_write_is_safe(item_count: int) -> bool:
+    """Whether pushing a tempo into a Reaper project can be done without
+    moving what's already in it.
+
+    Only when the project is empty. CONFIRMED BY LIVE TEST against Reaper
+    7.69: `SetCurrentBPM` does not just change a number, it drags every
+    beat-attached object with it. An item at 5.333s with a 0.333s fade
+    became an item at 4.000s with a 0.250s fade when the tempo went
+    90 -> 120, and back again on the way down - position, length AND
+    fades all scaled by the tempo ratio.
+
+    Canonical stores positions in SECONDS, so that is silent corruption:
+    the push moves everything already in the project, then places the
+    pushed clips at canonical's seconds positions, and the arrangement
+    is now wrong relative to itself. The next pull publishes the shifted
+    positions and the damage crosses to the other DAW. Nothing reports a
+    thing - the push says it succeeded.
+
+    An empty project has nothing to drag, and that is exactly the case
+    where the tempo matters most (a partner receiving a song for the
+    first time), so that one is still worth doing.
+    """
+    return item_count == 0
+
+
+def describe_tempo_write_refusal(session: Session, live_tempo: float, item_count: int) -> str | None:
+    """Warning when a project's tempo disagrees with the shared session
+    and DAWBridge won't touch it. See tempo_write_is_safe.
+    """
+    if abs(float(live_tempo) - float(session.tempo_bpm)) <= 1e-6:
+        return None
+    if tempo_write_is_safe(item_count):
+        return None
+    return (
+        f"the shared session is {session.tempo_bpm:g} BPM but this project is {float(live_tempo):g} "
+        f"BPM, and DAWBridge did NOT change it. Changing a Reaper project's tempo drags every "
+        f"item, fade and marker already in it to a new position (confirmed: an item at 5.333s "
+        f"moved to 4.000s on a 90->120 change), which would silently shift work that is already "
+        f"there. Set the tempo by hand if you want it, ideally before adding anything"
+    )
+
+
 def describe_meter_mismatch(session: Session, live_numerator: int, live_denominator: int) -> str | None:
     """Warning when the DAW's time signature differs from canonical's.
 

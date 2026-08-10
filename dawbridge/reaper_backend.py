@@ -29,6 +29,7 @@ from .sync import (
     describe_publish_sample_rate_change,
     describe_sample_rate_mismatch,
     describe_tempo_map_flattening,
+    describe_tempo_write_refusal,
     duplicate_adoption_warning,
     merge_pulled_track,
     missing_audio_warning,
@@ -36,6 +37,7 @@ from .sync import (
     plan_tracks,
     renumber_tracks,
     should_reimport_audio,
+    tempo_write_is_safe,
 )
 from .tagging import parse_tag, strip_tag, tag
 
@@ -174,8 +176,9 @@ class ReaperBackend(Backend):
 
     def read_live_markers(
         self, warnings: list[str] | None = None, for_publish: bool = False
-    ) -> list[LiveMarker]:
-        """Project markers, tagged and untagged. Regions are deliberately
+    ) -> list[LiveMarker] | None:
+        """Project markers, tagged and untagged, or None when their names
+        can't be read at all (see the check at the end of this method). Regions are deliberately
         not included - the schema models a marker as a point in time and
         has nowhere to put a region's end, so publishing one would round
         it to its start and silently destroy the range.
@@ -207,6 +210,32 @@ class ReaperBackend(Backend):
                            time_seconds=position, native=marker_index)
             )
 
+        # CONFIRMED BY LIVE TEST against Reaper 7.69 + reapy: the name
+        # out-parameter of EnumProjectMarkers2 is never populated over
+        # reapy's distant API - it echoes back whatever buffer was passed
+        # ('' stays '', 4096 spaces stay 4096 spaces), for EnumProjectMarkers,
+        # EnumProjectMarkers2 and EnumProjectMarkers3 alike, and inside an
+        # inside_reaper() block too. Numeric out-params are fine; string
+        # ones only work where the call takes an explicit buffer SIZE
+        # (GetMediaSourceFileName does, these don't).
+        #
+        # Identity lives in the name, so an empty name means no bridge
+        # tag, which means every pull would adopt every marker afresh,
+        # mint a new id and hand the partner a duplicate set on every
+        # single sync - the -01/-02/-03 failure, in markers. Returning
+        # None ("can't read markers") instead of a list of nameless ones
+        # keeps that damage from ever starting.
+        if markers and all(not m.name for m in markers):
+            if warnings is not None:
+                warnings.append(
+                    f"Reaper reported {len(markers)} marker(s) but no names, which is a known "
+                    f"limitation of reapy's remote API - it never fills in the name field. "
+                    f"Without names DAWBridge cannot tell markers apart, so markers were skipped "
+                    f"entirely rather than published as duplicates. Tracks and clips are "
+                    f"unaffected"
+                )
+            return None
+
         if warnings is not None and for_publish and regions:
             warnings.append(
                 f"this project has {regions} region(s), which DAWBridge does not sync - the "
@@ -235,7 +264,10 @@ class ReaperBackend(Backend):
         pulled: list[Marker] = []
         claimed: set[str] = set()
 
-        for live in self.read_live_markers(warnings, for_publish=True):
+        observed = self.read_live_markers(warnings, for_publish=True)
+        if observed is None:
+            return  # names unreadable - see read_live_markers
+        for live in observed:
             bridge_id = claim_live_id(live.bridge_id, claimed)
             if live.bridge_id and bridge_id is None:
                 warnings.append(duplicate_adoption_warning("marker", live.name, live.bridge_id))
@@ -273,6 +305,8 @@ class ReaperBackend(Backend):
         from reapy import reascript_api as RPR
 
         live = self.read_live_markers(warnings)
+        if live is None:
+            return  # names unreadable - see read_live_markers
         live_by_id = {m.bridge_id: m for m in live if m.bridge_id}
         plan = plan_markers(session.markers, set(live_by_id))
 
@@ -509,8 +543,24 @@ class ReaperBackend(Backend):
                 f"models a single session tempo, so the tempo map was left untouched "
                 f"(canonical tempo is {session.tempo_bpm:g} BPM)"
             )
-        elif abs(float(cur_tempo) - session.tempo_bpm) > 1e-6:
-            RPR.SetCurrentBPM(0, session.tempo_bpm, True)
+        else:
+            # SetCurrentBPM is not a cosmetic change: it drags every
+            # beat-attached item, fade and marker in the project to a new
+            # position. Confirmed live on Reaper 7.69 - an item at 5.333s
+            # with a 0.333s fade became 4.000s / 0.250s on a 90->120
+            # change, and back on the way down. Canonical is in SECONDS,
+            # so doing that mid-push silently relocates whatever was
+            # already in the project and then places the pushed clips at
+            # canonical's own positions, leaving the arrangement wrong
+            # against itself - and the next pull publishes the damage.
+            # Only safe when there is nothing to drag.
+            item_count = int(RPR.CountMediaItems(0))
+            if tempo_write_is_safe(item_count):
+                RPR.SetCurrentBPM(0, session.tempo_bpm, True)
+            else:
+                refusal = describe_tempo_write_refusal(session, cur_tempo, item_count)
+                if refusal:
+                    warnings.append(refusal)
 
         # The tempo above is applied; the METER never is - SetCurrentBPM
         # doesn't touch it and there's no meter write anywhere in this
