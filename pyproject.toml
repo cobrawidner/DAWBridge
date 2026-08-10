@@ -1,0 +1,23 @@
+[project]
+name = "dawbridge"
+version = "0.1.0"
+description = "Shared-folder session bridge between Reaper and Pro Tools"
+requires-python = ">=3.10"
+dependencies = []
+# Install the DAW you're driving separately, on the machine that has it:
+#   pip install python-reapy   # for the Reaper backend
+#   pip install py-ptsl        # for the Pro Tools backend
+# Neither is required just to run the tests or use the CLI's `status` command.
+
+[project.scripts]
+dawbridge = "dawbridge.cli:main"
+
+[project.gui-scripts]
+dawbridge-gui = "dawbridge.gui:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["dawbridge*"]

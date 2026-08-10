@@ -1,0 +1,23 @@
+# Build outputs. The .exe is 15 MB and regenerates from source in under a
+# minute - it belongs in a release, not in history.
+build/
+dist/
+*.spec
+*.egg-info/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Per-machine state, deliberately not shared: which revision this machine
+# last saw, and which folder the GUI last had open. Two people sharing
+# these would overwrite each other's notion of "last synced" and the
+# drift guard would stop being able to answer the question it exists for.
+.dawbridge_state.json
+.dawbridge_gui.json
+
+# Never the shared session folder itself. Its audio is hundreds of MB and
+# it is Dropbox's job, not git's.
+*.dawbridge/

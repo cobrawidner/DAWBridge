@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DAWBridge">
+  <rect x="0" y="0" width="64" height="64" fill="#0e1114"/>
+  <polygon points="8,10 27,28 27,36 8,54" fill="#6d9fd0"/>
+  <polygon points="56,10 37,28 37,36 56,54" fill="#f26a1f"/>
+  <rect x="28" y="4" width="8" height="56" fill="#e2e7ea"/>
+</svg>
