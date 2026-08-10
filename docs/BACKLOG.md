@@ -40,18 +40,22 @@ tried and failed the once it wasn't.
 
 ## Blocked on a live DAW
 
-Everything here is currently *suspected on reading*, not confirmed.
+The Pro Tools half was settled by live test on 2026-08-10. What remains is
+all Reaper, and all of it is blocked on **one dialog dismissal**: Reaper put
+up a "New Version Notification" modal, which holds its main thread, so the
+web interface on port 2307 stops serving and reapy cannot attach. One click
+on *Close* unblocks every item below. The probe script is written and waiting
+at `scratchpad/probe_reaper.py`.
 
-- **Pro Tools memory-location time unit.** `CreateMemoryLocationRequestBody`
-  has no time-type field, so `start_time` is in whatever the session displays.
-  The entire marker write path is built around not knowing this. Settling it
-  turns a careful dodge into a real answer. **Highest-value unknown.**
-- **Reaper `EnumProjectMarkers2` tuple layout** — both handled blind; which is
-  real is unconfirmed.
-- **Stereo from the Pro Tools side.** Tested, never once verified by ear or by
-  a live round trip. Pro Tools stores stereo as separate `.L`/`.R` files.
-- **Reaper tempo-map write** for time signature. Refused so far because it
-  edits the tempo map and can't be validated without a live Reaper.
+- **Reaper `EnumProjectMarkers2` tuple layout** — both handled blind by
+  `_decode_marker_row`; safe, but which one this install returns is unknown.
+- **Fade read-back** on the Reaper side.
+- **Reaper tempo-map write** for time signature — still refused, since it
+  edits the tempo map and needs a live Reaper to validate against.
+
+Note: reapy is already configured on this machine (`csurf_0=HTTP 0 2307`,
+server script registered in `reaper-kb.ini`). `dist_api_is_enabled()` returns
+False only when Reaper isn't running - that is not a setup problem.
 
 ---
 
@@ -67,12 +71,6 @@ Everything here is currently *suspected on reading*, not confirmed.
    `history` and `restore` are CLI-only, and the person most likely to need
    them is the non-technical collaborator, who has no Python. The 20-revision
    archive is only a safety net for someone who can reach it.
-
-3. **Pro Tools never re-applies position, length or audio to clips that
-   already exist** *(dawbridge-collab)*. It warns, so it isn't silent — but
-   preview says "3 clips moved" and the pull doesn't move them. Preview and
-   push disagreeing is the one thing the shared `read_live_state` design was
-   meant to make impossible.
 
 4. **No preview for the publish direction** *(main session)*. `preview` only
    describes what a pull would change in your DAW. Before publishing —
@@ -113,6 +111,20 @@ Recorded so nobody spends a session rediscovering the reasoning.
   because it's a display.
 - **Markers were implemented, not deleted** — a format claiming fidelity it
   doesn't have is worse than a smaller honest one.
+- **Pro Tools cannot move a clip that already exists, and this is not
+  fixable.** Confirmed live: `CId_GetClipList` returns an empty list even
+  with clips on the timeline and a selection made, so there is no read path
+  to a timeline clip's identity; and re-spotting a clip's own ids
+  *duplicates* rather than moves — one clip at 4s became two, at 4s and 10s.
+  The obvious "fix" would silently duplicate every moved clip. Warn-don't-move
+  is correct. Do not revisit without new PTSL commands.
+- **Pro Tools memory-location times are samples.** Reads are always samples
+  regardless of the main counter (verified against Bars|Beats, TimeCode and
+  Min:Secs); writes accept several formats and resolve them correctly. The
+  earlier format-learning fallback was built on a wrong assumption and is
+  gone.
+- **PTSL has no tempo, meter, marker or time-signature command** — re-verified
+  against the installed protobufs: 276 commands, none of them.
 - **The mark is `i2` in signal orange.** `.ico` and `dawbridge_mark.svg` are
   build outputs; regenerate with `python tools/build_exe.py --icon-only` after
   any colourway change — they don't update from a `theme.py` edit alone.
