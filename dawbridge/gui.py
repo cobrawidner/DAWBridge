@@ -25,6 +25,24 @@ from .sync import preview_push
 _CONFIG_PATH = Path.home() / ".dawbridge_gui.json"
 
 
+def _unavailable(backend, daw: str) -> str | None:
+    """Why this DAW can't be reached, or None if it can.
+
+    Probes once: `is_available()` on a closed Pro Tools costs seconds, and
+    asking twice would double it. `getattr` because the test doubles are
+    duck-typed rather than Backend subclasses and define only
+    `is_available` - a bare call would AttributeError in the suite while
+    working perfectly against a real backend.
+    """
+    probe = getattr(backend, "unavailable_reason", None)
+    if probe is not None:
+        return probe()
+    return None if backend.is_available() else (
+        f"{daw} doesn't look reachable right now - is it open and is "
+        f"scripting enabled?"
+    )
+
+
 def _get_backend(daw: str) -> Backend:
     if daw == "reaper":
         from .reaper_backend import ReaperBackend
@@ -715,10 +733,9 @@ class DawBridgeGUI(ttk.Frame):
         store.ensure_layout()
         backend = _get_backend(daw)
 
-        if not backend.is_available():
-            self.master.after(
-                0, lambda: self._log(f"[preview] {daw} doesn't look reachable - is it open and scripting enabled?")
-            )
+        reason = _unavailable(backend, daw)
+        if reason is not None:
+            self.master.after(0, lambda: self._log(f"[preview] {reason}"))
             return
 
         session = store.load()
@@ -753,10 +770,9 @@ class DawBridgeGUI(ttk.Frame):
         store.ensure_layout()
         backend = _get_backend(daw)
 
-        if not backend.is_available():
-            self.master.after(
-                0, lambda: self._log(f"[pull] {daw} doesn't look reachable - is it open and scripting enabled?")
-            )
+        reason = _unavailable(backend, daw)
+        if reason is not None:
+            self.master.after(0, lambda: self._log(f"[pull] {reason}"))
             return
 
         session = store.load()
@@ -871,10 +887,9 @@ class DawBridgeGUI(ttk.Frame):
         store.ensure_layout()
         backend = _get_backend(daw)
 
-        if not backend.is_available():
-            self.master.after(
-                0, lambda: self._log(f"[pull] {daw} doesn't look reachable - is it open and scripting enabled?")
-            )
+        reason = _unavailable(backend, daw)
+        if reason is not None:
+            self.master.after(0, lambda: self._log(f"[pull] {reason}"))
             return
 
         session = store.load()

@@ -114,6 +114,24 @@ def _print_preview(preview, session, folder: Path, daw: str) -> None:
         print(f"\n[dawbridge][warning] {w}")
 
 
+def _unavailable(backend, daw: str) -> str | None:
+    """Why this DAW can't be reached, or None if it can.
+
+    Probes once: `is_available()` on a closed Pro Tools costs seconds, and
+    asking twice would double it. `getattr` because the test doubles are
+    duck-typed rather than Backend subclasses and define only
+    `is_available` - a bare call would AttributeError in the suite while
+    working perfectly against a real backend.
+    """
+    probe = getattr(backend, "unavailable_reason", None)
+    if probe is not None:
+        return probe()
+    return None if backend.is_available() else (
+        f"{daw} doesn't look reachable right now - is it open and is "
+        f"scripting enabled?"
+    )
+
+
 def _get_backend(daw: str) -> Backend:
     if daw == "reaper":
         from .reaper_backend import ReaperBackend
@@ -137,9 +155,9 @@ def cmd_publish(args: argparse.Namespace) -> int:
     store.ensure_layout()
     backend = _get_backend(args.daw)
 
-    if not backend.is_available():
-        print(f"[dawbridge] {args.daw} doesn't look reachable right now - "
-              f"is it open and is scripting enabled?", file=sys.stderr)
+    reason = _unavailable(backend, args.daw)
+    if reason is not None:
+        print(f"[dawbridge] {reason}", file=sys.stderr)
         return 1
 
     session = store.load()
@@ -244,9 +262,9 @@ def cmd_preview(args: argparse.Namespace) -> int:
     store.ensure_layout()
     backend = _get_backend(args.daw)
 
-    if not backend.is_available():
-        print(f"[dawbridge] {args.daw} doesn't look reachable right now - "
-              f"is it open and is scripting enabled?", file=sys.stderr)
+    reason = _unavailable(backend, args.daw)
+    if reason is not None:
+        print(f"[dawbridge] {reason}", file=sys.stderr)
         return 1
 
     session = store.load()
@@ -262,9 +280,9 @@ def cmd_load(args: argparse.Namespace) -> int:
     store.ensure_layout()
     backend = _get_backend(args.daw)
 
-    if not backend.is_available():
-        print(f"[dawbridge] {args.daw} doesn't look reachable right now - "
-              f"is it open and is scripting enabled?", file=sys.stderr)
+    reason = _unavailable(backend, args.daw)
+    if reason is not None:
+        print(f"[dawbridge] {reason}", file=sys.stderr)
         return 1
 
     session = store.load()
