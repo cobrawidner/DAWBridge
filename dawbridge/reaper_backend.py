@@ -54,6 +54,7 @@ from .backend import Backend, LiveClip, LiveMarker, LiveTrack
 from .model import Clip, Marker, Session, Track, new_id
 from .sync import (
     claim_live_id,
+    resolve_identities,
     plan_markers,
     describe_dropped_tracks,
     describe_meter_mismatch,
@@ -115,6 +116,49 @@ _RPP_MARKER_RE = re.compile(
         (?: \s+ (?P<isrgn>\d+) )? """,
     re.VERBOSE,
 )
+
+
+#: Reaper's per-object extended state key holding the bridge id. Chosen
+#: because a musician never sees it: it survives a rename (confirmed live -
+#: the id read back unchanged after the track was renamed), and it
+#: serialises into the .rpp as `<EXT> dawbridge_id ... >` on a track and
+#: `<EXTI> ... >` on an item (both confirmed in a saved scratch project,
+#: on a track named plain `FadeProbe` with no tag in its name at all -
+#: exactly the case this exists for).
+#:
+#: ASSUMED, NOT VERIFIED: that reapy reads these back after the project is
+#: closed and reopened. The data is provably in the file and for RPP chunk
+#: data those are the same thing in practice, but the reload has never been
+#: run. Worth doing the first time a live Reaper is free.
+#:
+#: A SECOND PLACE TO LOOK, never the authority - see sync.resolve_identities.
+_EXT_ID_KEY = "P_EXT:dawbridge_id"
+
+
+def _read_ext_id(getset, native_id) -> str | None:
+    """The bridge id stored on a track or item, or None.
+
+    `getset` is RPR.GetSetMediaTrackInfo_String or its item equivalent.
+    Verified live: an unset key returns "" (not the buffer that was passed
+    in), so this is a real read rather than the echo that defeats
+    EnumProjectMarkers2.
+    """
+    try:
+        result = getset(native_id, _EXT_ID_KEY, "", False)
+    except Exception:
+        return None
+    value = result[3] if isinstance(result, (list, tuple)) and len(result) > 3 else ""
+    return value or None
+
+
+def _write_ext_id(getset, native_id, bridge_id: str) -> None:
+    """Store the bridge id where a rename can't reach it. Never fatal - the
+    name is still the mechanism, this is only the net under it.
+    """
+    try:
+        getset(native_id, _EXT_ID_KEY, bridge_id, True)
+    except Exception:
+        pass
 
 
 def _parse_rpp_markers(text: str) -> list[dict] | None:
@@ -551,30 +595,40 @@ class ReaperBackend(Backend):
         # keeps its existing clip history via merge_pulled_track; a track
         # not present in this pull is simply not carried forward.
         pulled_tracks = []
-        # Duplicating a track in Reaper copies its name, bridge tag
-        # included, so two tracks can claim one identity. Whoever gets
-        # there first keeps it; the copy is adopted as a new track below.
-        claimed_track_ids: set[str] = set()
 
-        for idx in range(project.n_tracks):
-            native_track = project.tracks[idx]
-            raw_name = native_track.name
-            base_name, parsed_id = parse_tag(raw_name)
-            bridge_id = claim_live_id(parsed_id, claimed_track_ids)
-            if parsed_id and bridge_id is None:
-                warnings.append(duplicate_adoption_warning("track", base_name, parsed_id))
+        # Identity is resolved for ALL tracks before any of them is used,
+        # because a tag in a name has to beat an id stored in a copy of
+        # that track no matter which order Reaper lists them in - see
+        # sync.resolve_identities.
+        natives = [project.tracks[idx] for idx in range(project.n_tracks)]
+        observed = []
+        for native_track in natives:
+            base_name, parsed_id = parse_tag(native_track.name)
+            observed.append(
+                (parsed_id, _read_ext_id(RPR.GetSetMediaTrackInfo_String, native_track.id), base_name)
+            )
+        decisions = resolve_identities(observed, kind="track")
+
+        for native_track, (_nid, _eid, base_name), decision in zip(natives, observed, decisions):
+            if decision.warning:
+                warnings.append(decision.warning)
             n_channels = int(RPR.GetMediaTrackInfo_Value(native_track.id, "I_NCHAN"))
-            track = merge_pulled_track(session, base_name, bridge_id, kind="audio", channels=n_channels)
+            track = merge_pulled_track(
+                session, base_name, decision.bridge_id, kind="audio", channels=n_channels
+            )
             pulled_tracks.append(track)
             # Unlike channels, mute always reflects the live DAW - captured
             # fresh on every pull, not just when the track is first adopted.
             track.muted = native_track.is_muted
-            if bridge_id is None:
-                # Adopt this local-only track: stamp it with its new id so
-                # it's recognized next time.
+            if decision.write_name_tag:
+                # Either a brand new adoption, or a name whose tag was
+                # tidied away and has just been recovered from the id
+                # stored inside the project.
                 RPR.GetSetMediaTrackInfo_String(
                     native_track.id, "P_NAME", tag(base_name, track.id), True
                 )
+            if decision.write_extended_state:
+                _write_ext_id(RPR.GetSetMediaTrackInfo_String, native_track.id, track.id)
 
             self._pull_clips(native_track, track, session, store, warnings)
 
@@ -607,27 +661,44 @@ class ReaperBackend(Backend):
 
         return session
 
+    def _stamp_clip_identity(self, RPR, item, take, base_name: str, clip_id: str, decision) -> None:
+        """Write identity back onto a live item: the tag into the take name
+        when it's missing, and the id into extended state where a rename
+        can't reach it. See sync.resolve_identities for which is which.
+        """
+        if decision.write_name_tag:
+            RPR.GetSetMediaItemTakeInfo_String(take.id, "P_NAME", tag(base_name, clip_id), True)
+        if decision.write_extended_state:
+            _write_ext_id(RPR.GetSetMediaItemInfo_String, item.id, clip_id)
+
     def _pull_clips(self, native_track, track: Track, session: Session, store, warnings: list[str]) -> None:
         from reapy import reascript_api as RPR
 
         # Replace track.clips wholesale with what's live now - same
         # reasoning as pull()'s track-list replacement (see sync.py).
         pulled_clips = []
-        # Same story as tracks: "duplicate items" copies the take name and
-        # so the bridge tag with it.
-        claimed_clip_ids: set[str] = set()
 
-        n_items = native_track.n_items
-        for i in range(n_items):
+        # Same two-pass resolution as tracks: "duplicate items" copies the
+        # take name AND the stored id, so a tag in a name has to win before
+        # any stored id is consulted (sync.resolve_identities).
+        takes = []
+        for i in range(native_track.n_items):
             item = native_track.items[i]
             take = item.active_take
-            if take is None:
-                continue
-            raw_name = take.name
-            base_name, parsed_clip_id = parse_tag(raw_name)
-            clip_id = claim_live_id(parsed_clip_id, claimed_clip_ids)
-            if parsed_clip_id and clip_id is None:
-                warnings.append(duplicate_adoption_warning("clip", base_name, parsed_clip_id))
+            if take is not None:
+                takes.append((item, take))
+        observed = []
+        for item, take in takes:
+            base, parsed = parse_tag(take.name)
+            observed.append(
+                (parsed, _read_ext_id(RPR.GetSetMediaItemInfo_String, item.id), base)
+            )
+        clip_decisions = resolve_identities(observed, kind="clip")
+
+        for (item, take), (_nid, _eid, base_name), decision in zip(takes, observed, clip_decisions):
+            clip_id = decision.bridge_id
+            if decision.warning:
+                warnings.append(decision.warning)
 
             source_offset = RPR.GetMediaItemTakeInfo_Value(take.id, "D_STARTOFFS")
             loop_source = bool(RPR.GetMediaItemInfo_Value(item.id, "B_LOOPSRC"))
@@ -665,6 +736,7 @@ class ReaperBackend(Backend):
                         _import_audio(store, live_source_path, warnings, base_name, track.name)
                         or existing_clip.audio_file
                     )
+                self._stamp_clip_identity(RPR, item, take, base_name, existing_clip.id, decision)
                 pulled_clips.append(existing_clip)
                 continue
 
@@ -682,10 +754,7 @@ class ReaperBackend(Backend):
                 loop_source=loop_source,
             )
             pulled_clips.append(new_clip)
-            if clip_id is None:
-                RPR.GetSetMediaItemTakeInfo_String(
-                    take.id, "P_NAME", tag(base_name, new_clip.id), True
-                )
+            self._stamp_clip_identity(RPR, item, take, base_name, new_clip.id, decision)
 
         track.clips = pulled_clips
 

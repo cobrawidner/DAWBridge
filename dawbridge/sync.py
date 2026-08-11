@@ -506,6 +506,110 @@ def renumber_tracks(tracks: list[Track]) -> None:
         track.order = position
 
 
+@dataclass
+class Identity:
+    """Where one DAW object's bridge id came from, and what to write back.
+
+    `bridge_id` is None when nothing could be recovered and the caller
+    should mint a fresh id and adopt the object.
+    """
+    bridge_id: str | None
+    source: str  # "name" | "extended state" | "new"
+    write_name_tag: bool = False
+    write_extended_state: bool = False
+    warning: str | None = None
+
+
+def resolve_identities(
+    observed: list[tuple[str | None, str | None, str]], kind: str = "track"
+) -> list[Identity]:
+    """Decide each object's identity from its name tag and its stored id.
+
+    `observed` is one (name_id, extended_state_id, label) per live object,
+    in the order the DAW reported them.
+
+    Identity lives in the DAW-native name - that is the only thing two DAWs
+    sharing no identifiers can agree on, and Pro Tools has no equivalent of
+    extended state, so the name stays the mechanism. Extended state is a
+    second place to LOOK when the name has lost its tag, which is what
+    happens when somebody tidies "Lead Vocal #a1b2c3d4" back to "Lead
+    Vocal". Today that publishes as a brand new track and hands the partner
+    a duplicate on every sync afterwards, silently, because a missing tag
+    is indistinguishable from a genuinely new track.
+
+    Resolved in two passes, and the order matters more than it looks:
+
+      1. every object whose NAME carries a tag claims that id;
+      2. only then may an untagged object recover an id from extended state.
+
+    Duplicating a track copies its extended state along with its name. If
+    extended state could claim first, a copy whose name had been tidied
+    would look exactly like a recovery case, take the original's identity,
+    and republish the original as a new track - the copy inheriting the
+    history. Resolving names first makes that impossible regardless of the
+    order the DAW lists them in.
+    """
+    claimed: set[str] = set()
+    decisions: list[Identity | None] = [None] * len(observed)
+
+    # Pass 1: a tag in the name is authoritative.
+    for index, (name_id, ext_id, label) in enumerate(observed):
+        if not name_id or name_id in claimed:
+            continue
+        claimed.add(name_id)
+        if ext_id == name_id:
+            decisions[index] = Identity(name_id, "name")
+        elif ext_id is None:
+            # Pre-existing track from before this existed: put the net in
+            # place underneath it without touching the name.
+            decisions[index] = Identity(name_id, "name", write_extended_state=True)
+        else:
+            decisions[index] = Identity(
+                name_id, "name", write_extended_state=True,
+                warning=(
+                    f"{kind} {label!r} carries DAWBridge id #{name_id} in its name but #{ext_id} "
+                    f"stored inside the project - it was probably copied in from another "
+                    f"session. The name is what your partner's DAW sees, so #{name_id} wins and "
+                    f"the stored id has been corrected to match"
+                ),
+            )
+
+    # Pass 2: an untagged object may recover an id nobody else claimed.
+    for index, (name_id, ext_id, label) in enumerate(observed):
+        if decisions[index] is not None:
+            continue
+        if name_id and name_id in claimed:
+            decisions[index] = Identity(
+                None, "new", write_name_tag=True, write_extended_state=True,
+                warning=duplicate_adoption_warning(kind, label, name_id),
+            )
+            continue
+        if ext_id and ext_id not in claimed:
+            claimed.add(ext_id)
+            decisions[index] = Identity(
+                ext_id, "extended state", write_name_tag=True,
+                warning=(
+                    f"{kind} {label!r} had lost its DAWBridge tag from its name - recovered "
+                    f"#{ext_id} from the id stored inside the project and put the tag back. "
+                    f"Without that it would have been published as a new {kind} and your "
+                    f"partner would have collected a duplicate"
+                ),
+            )
+            continue
+        warning = None
+        if ext_id:
+            warning = (
+                f"{kind} {label!r} stores DAWBridge id #{ext_id} but another {kind} is already "
+                f"using it, so this one is a copy - it has been adopted as a new {kind} and will "
+                f"appear as an additional one for your partner"
+            )
+        decisions[index] = Identity(
+            None, "new", write_name_tag=True, write_extended_state=True, warning=warning
+        )
+
+    return [d for d in decisions if d is not None]
+
+
 def claim_live_id(bridge_id: str | None, seen: set[str]) -> str | None:
     """Whether a bridge id read out of a DAW may be used as identity.
 
