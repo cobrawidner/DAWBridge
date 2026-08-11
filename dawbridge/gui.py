@@ -351,6 +351,19 @@ class DawBridgeGUI(ttk.Frame):
     def _on_load(self) -> None:
         self._run_async(self._do_load)
 
+    def _notify(self, folder: Path, event: str, message: str) -> None:
+        """Tell Discord, if it's set up. Runs on the worker thread.
+
+        Always logs the outcome. A notification that fails silently is
+        worse than none at all, because the other person is then relying
+        on a message that never arrived.
+        """
+        if not notify.is_enabled_for(folder, event):
+            return
+        problem = notify.post(folder, message)
+        line = f"[notify] {problem}" if problem else "[notify] posted to Discord"
+        self.master.after(0, lambda: self._log(line))
+
     def _on_check(self) -> None:
         self._run_async(self._do_check)
 
@@ -642,7 +655,13 @@ class DawBridgeGUI(ttk.Frame):
             ),
         )
         for w in pull_warnings:
-            self.master.after(0, lambda w=w: self._log(f"[pull][warning] {w}"))
+            self.master.after(0, lambda w=w: self._log(f"[push][warning] {w}"))
+
+        self._notify(folder, "publish", notify.describe_publish(
+            who=f"gui@{daw}", daw=daw, revision=session.revision,
+            tracks=len(session.tracks),
+            clips=sum(len(t.clips) for t in session.tracks),
+            warnings=len(pull_warnings)))
 
     def _do_load(self, folder: Path) -> None:
         """The "Pull from Bridge" button: the shared session lands in this DAW."""
@@ -686,6 +705,9 @@ class DawBridgeGUI(ttk.Frame):
         self.master.after(0, lambda: self._log(f"[pull] loaded session revision {session.revision} into {daw}."))
         for w in warnings:
             self.master.after(0, lambda w=w: self._log(f"[pull][warning] {w}"))
+
+        self._notify(folder, "load", notify.describe_load(
+            who=f"gui@{daw}", daw=daw, revision=session.revision))
 
     def _ask_confirm_on_main_thread(self, preview, daw: str) -> bool:
         """Ask for confirmation from a worker thread, safely.

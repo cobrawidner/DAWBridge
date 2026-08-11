@@ -77,7 +77,8 @@ change in your DAW. Before publishing, the thing to check is that you pulled
 first.
 
 Tell your collaborator when you've published. DAWBridge will *catch* the case
-where you both publish at once, but a message is faster than a warning.
+where you both publish at once, but a message is faster than a warning — and
+if a Discord channel is set up (below), that message sends itself.
 
 ---
 
@@ -153,6 +154,32 @@ Puts an old version back as the current shared version. It moves *forward* —
 publishing the old content as a new version rather than rewinding the counter
 — so your collaborator's copy actually notices the change, and the version it
 replaced is kept too, which makes an unwanted restore undoable.
+
+---
+
+## Telling each other automatically (optional)
+
+DAWBridge can post to a Discord channel every time either of you publishes or
+loads, so nobody has to remember to say so.
+
+In Discord: **Server Settings → Integrations → Webhooks → New Webhook**, pick
+the channel, and copy the URL. Then, once, from the developer setup:
+
+```bash
+python -m dawbridge.cli notify --folder "<the shared folder>" --webhook "<the url>"
+python -m dawbridge.cli notify --folder "<the shared folder>" --test
+```
+
+Set it up once and **both** of you start posting — the setting lives in the
+shared folder, not on one machine. That's deliberate: a notification only one
+of you receives is worse than none.
+
+Messages say who, which DAW, the revision and how many tracks and clips. They
+never include file paths, audio, or anything from inside your session. If
+Discord is unreachable the sync still completes normally and the app says so
+in the log.
+
+To stop: `--off`. To post only on publishes: `--events publish`.
 
 ---
 

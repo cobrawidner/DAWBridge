@@ -11,6 +11,7 @@ Usage:
     dawbridge history --folder /path/to/shared
     dawbridge restore --folder /path/to/shared --revision 7
     dawbridge doctor  --folder /path/to/shared
+    dawbridge notify  --folder /path/to/shared --webhook <discord url>
 
 pull:    shared session.json -> applied into the live DAW (non-destructive)
 push:    live DAW state -> becomes the shared session.json
@@ -20,6 +21,8 @@ history: past revisions of the shared session still kept in archive/
 restore: republish an archived revision as the current shared session
 doctor:  check the shared folder for conflicted copies, missing audio and
          overlaps - read-only, touches no DAW
+notify:  set up a Discord webhook so the channel is told on every
+         publish and load
 
 The names are from your point of view, not the app's: you pull the shared
 session in and push your work out, the way those words work everywhere
@@ -34,7 +37,7 @@ import getpass
 import sys
 from pathlib import Path
 
-from . import checks, syncstate
+from . import checks, notify, syncstate
 from .backend import Backend
 from .model import Session, UnsupportedSchemaVersion
 from .store import SharedSessionMoved, SharedStore
@@ -196,6 +199,15 @@ def cmd_publish(args: argparse.Namespace) -> int:
           f"{len(session.tracks)} total. Shared session now at revision {session.revision}.")
     for w in pull_warnings:
         print(f"[dawbridge][warning] {w}")
+
+    if notify.is_enabled_for(Path(args.folder), "publish"):
+        problem = notify.post(Path(args.folder), notify.describe_publish(
+            who=getpass.getuser(), daw=args.daw, revision=session.revision,
+            tracks=len(session.tracks),
+            clips=sum(len(t.clips) for t in session.tracks),
+            warnings=len(pull_warnings)))
+        print(f"[dawbridge][notify] {problem}" if problem
+              else "[dawbridge][notify] told Discord")
     return 0
 
 
@@ -259,6 +271,12 @@ def cmd_load(args: argparse.Namespace) -> int:
     print(f"[dawbridge] loaded session revision {session.revision} into {args.daw}.")
     for w in warnings:
         print(f"[dawbridge][warning] {w}")
+
+    if notify.is_enabled_for(Path(args.folder), "load"):
+        problem = notify.post(Path(args.folder), notify.describe_load(
+            who=getpass.getuser(), daw=args.daw, revision=session.revision))
+        print(f"[dawbridge][notify] {problem}" if problem
+              else "[dawbridge][notify] told Discord")
     return 0
 
 
@@ -359,6 +377,50 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_notify(args: argparse.Namespace) -> int:
+    """Set up, inspect or test the Discord notification for this folder."""
+    root = Path(args.folder)
+    if not root.is_dir():
+        print(f"[notify] no such folder: {root}", file=sys.stderr)
+        return 1
+
+    if args.off:
+        notify.config_path(root).unlink(missing_ok=True)
+        print("[notify] notifications turned off for this shared folder.")
+        return 0
+
+    if args.webhook:
+        reason = notify.reject_reason(args.webhook)
+        if reason:
+            print(f"[notify] refusing: {reason}", file=sys.stderr)
+            return 1
+        config = notify.load_config(root)
+        config["discord_webhook"] = args.webhook
+        if args.events:
+            config["events"] = args.events
+        notify.save_config(root, config)
+        print(f"[notify] saved to {notify.config_path(root)}")
+        print("[notify] this lives in the SHARED folder, so both machines will post "
+              "to the channel - that's deliberate.")
+
+    url = notify.webhook_url(root)
+    if not url:
+        print("[notify] not configured. Set one up with:")
+        print(f"    dawbridge notify --folder {args.folder} --webhook <discord webhook url>")
+        return 0
+
+    events = [e for e in ("publish", "load") if notify.is_enabled_for(root, e)]
+    print(f"[notify] configured, posting on: {', '.join(events) or 'nothing'}")
+
+    if args.test:
+        problem = notify.post(root, "DAWBridge test message - notifications are working.")
+        if problem:
+            print(f"[notify] {problem}", file=sys.stderr)
+            return 1
+        print("[notify] test message sent - check the channel.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dawbridge")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -383,6 +445,15 @@ def build_parser() -> argparse.ArgumentParser:
         p = sub.add_parser(name)
         p.add_argument("--folder", required=True)
         p.set_defaults(func=fn)
+
+    p = sub.add_parser("notify")
+    p.add_argument("--folder", required=True)
+    p.add_argument("--webhook", help="Discord webhook URL to post to")
+    p.add_argument("--events", nargs="+", choices=["publish", "load"],
+                   help="which events to post (default: both)")
+    p.add_argument("--test", action="store_true", help="send a test message now")
+    p.add_argument("--off", action="store_true", help="stop notifying for this folder")
+    p.set_defaults(func=cmd_notify)
 
     p = sub.add_parser("restore")
     p.add_argument("--folder", required=True)
