@@ -209,6 +209,36 @@ in PTSL and are unused.
 sides would behave differently, which is its own cost.
 *Recommendation.* Only after #3. If #3 lands and feels like enough, drop this.
 
+## Verified live
+
+**2026-08-11, Reaper 7.78, run from the main session** (the auditor was cut
+off by API session limits six times running, so this was done directly).
+Scratch project and scratch shared folder throughout; the per-machine sync
+state was redirected to a scratch file and confirmed untouched afterwards.
+
+- **Extended state survives close and reopen.** A project saved the previous
+  day, Reaper quit and relaunched: `dawbridge_id` read straight back through
+  the shipping accessor, on a track named plain `FadeProbe` with no tag.
+  This is the assumption the whole identity net rested on, and it had never
+  been run.
+- **Identity recovery works end to end.** Canonical knew the track under its
+  old name; Reaper's copy had no tag. The publish produced **one** track,
+  not a duplicate, restamped Reaper's name to `FadeProbe #a1b2c3d4`, and
+  warned.
+- **A duplicate cannot steal the original's identity.** A second track
+  carrying the same extended state and no name tag was adopted as new
+  (`#40bfef98`) and reported as a copy; the original kept its id. This is
+  the case that would have been worst to get wrong.
+- **Selective publish preserves the partner's work.** A track added to
+  canonical after this machine's baseline survived a publish from a DAW that
+  had never seen it - `kept_theirs: ['Partner Overdub']`.
+- **Deletion still works.** The same track, once it *was* in the baseline and
+  absent from the DAW, was removed - so preserving by default did not
+  quietly break deleting.
+
+Not exercised live: the same paths in **Pro Tools**, and the
+`unavailable_reason` "running but refused" branch.
+
 ## Blocked on a live DAW
 
 **Proposal 11 (session start time), attempted and not settled.** Pro Tools
