@@ -30,10 +30,10 @@ class _Backend:
     def read_live_markers(self):
         return self._markers
 
-    def pull(self, session, store, warnings=None):
+    def capture(self, session, store, warnings=None):
         return session
 
-    def push(self, session, store):
+    def apply(self, session, store):
         return []
 
 

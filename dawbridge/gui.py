@@ -778,7 +778,7 @@ class DawBridgeGUI(ttk.Frame):
         # removes from the shared session, offline media, a sample rate
         # being redefined. Previously discovered and dropped in silence.
         pull_warnings: list[str] = []
-        session = backend.pull(session, store, pull_warnings)
+        session = backend.capture(session, store, pull_warnings)
         # Reading a DAW takes seconds to minutes. Everything checked above
         # was checked before that read, so a partner publishing during it
         # would slip past every guard - this is the last chance to notice.
@@ -850,7 +850,7 @@ class DawBridgeGUI(ttk.Frame):
             self.master.after(0, lambda: self._log("[pull] cancelled - nothing was changed."))
             return
 
-        warnings = backend.push(session, store)
+        warnings = backend.apply(session, store)
         syncstate.record_sync(folder, daw, session.revision, "load", project)
         self.master.after(0, lambda: self._log(f"[pull] loaded session revision {session.revision} into {daw}."))
         for w in warnings:

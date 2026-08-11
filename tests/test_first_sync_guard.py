@@ -29,11 +29,11 @@ class _Backend:
     def read_live_state(self):
         return []
 
-    def pull(self, session, store, warnings=None):
+    def capture(self, session, store, warnings=None):
         session.tracks = [Track.new(name="Audio 1")]
         return session
 
-    def push(self, session, store):
+    def apply(self, session, store):
         self.pushed = True
         return []
 

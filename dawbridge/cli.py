@@ -178,7 +178,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
     # offline media, a sample rate being redefined. Those used to be
     # discovered and dropped on the floor at the point of discovery.
     pull_warnings: list[str] = []
-    session = backend.pull(session, store, pull_warnings)
+    session = backend.capture(session, store, pull_warnings)
     try:
         # --force means "publish over theirs on purpose", so it also waives
         # the check for anything that landed while we were reading.
@@ -267,7 +267,7 @@ def cmd_load(args: argparse.Namespace) -> int:
         return 0
 
     print()
-    warnings = backend.push(session, store)
+    warnings = backend.apply(session, store)
     syncstate.record_sync(Path(args.folder), args.daw, session.revision, "load", project)
     print(f"[dawbridge] loaded session revision {session.revision} into {args.daw}.")
     for w in warnings:

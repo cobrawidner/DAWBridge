@@ -20,14 +20,14 @@ class _NoisyBackend:
     def read_live_state(self):
         return []
 
-    def pull(self, session, store, warnings=None):
+    def capture(self, session, store, warnings=None):
         if warnings is not None:
             warnings.append("publishing removes 'Harmony Vox' (2 clips) from the shared session")
             warnings.append("'take_04.wav' is offline in this project")
         session.tracks = [Track.new(name="Kept")]
         return session
 
-    def push(self, session, store):
+    def apply(self, session, store):
         return []
 
 
@@ -47,7 +47,7 @@ def test_cli_publish_prints_what_the_backend_noticed(tmp_path, monkeypatch, caps
 
 def test_a_backend_that_ignores_the_list_still_works(tmp_path, monkeypatch, capsys):
     class _Old(_NoisyBackend):
-        def pull(self, session, store, warnings=None):
+        def capture(self, session, store, warnings=None):
             session.tracks = [Track.new(name="Kept")]
             return session
 

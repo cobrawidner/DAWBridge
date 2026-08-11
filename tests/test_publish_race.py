@@ -57,14 +57,14 @@ class _SlowBackend:
     def read_live_state(self):
         return []
 
-    def pull(self, session, store, warnings=None):
+    def capture(self, session, store, warnings=None):
         landed = self.store.load()
         landed.tracks = [Track.new(name="Their late arrival")]
         self.store.save(landed, updated_by="partner@protools")
         session.tracks = [Track.new(name="Mine")]
         return session
 
-    def push(self, session, store):
+    def apply(self, session, store):
         return []
 
 
