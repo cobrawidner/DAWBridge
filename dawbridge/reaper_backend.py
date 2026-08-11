@@ -259,7 +259,10 @@ class ReaperBackend(Backend):
     # ---- markers -------------------------------------------------------
 
     def read_live_markers(
-        self, warnings: list[str] | None = None, for_publish: bool = False,
+        self,
+        warnings: list[str] | None = None,
+        *,
+        for_publish: bool = False,
         save_first: bool = False,
     ) -> list[LiveMarker] | None:
         """Project markers, tagged and untagged, or None when their names
@@ -495,7 +498,7 @@ class ReaperBackend(Backend):
 
     # ---- pull: live Reaper project -> canonical Session ----------------
 
-    def pull(self, session: Session, store, warnings: list[str] | None = None) -> Session:
+    def capture(self, session: Session, store, warnings: list[str] | None = None) -> Session:
         import reapy
         from reapy import reascript_api as RPR
 
@@ -688,7 +691,7 @@ class ReaperBackend(Backend):
 
     # ---- push: canonical Session -> live Reaper project -----------------
 
-    def push(self, session: Session, store) -> list[str]:
+    def apply(self, session: Session, store) -> list[str]:
         import reapy
         from reapy import reascript_api as RPR
 

@@ -34,15 +34,45 @@ def test_pull_accepts_a_warnings_list_and_works_without_one():
     assert isinstance(warnings, list)
 
 
-def test_every_backend_advertises_the_same_pull_signature():
+def test_every_backend_advertises_the_same_capture_signature():
     import inspect
 
     from dawbridge.protools_backend import ProToolsBackend
     from dawbridge.reaper_backend import ReaperBackend
 
     for cls in (Backend, MockBackend, ReaperBackend, ProToolsBackend):
-        params = list(inspect.signature(cls.pull).parameters)
+        params = list(inspect.signature(cls.capture).parameters)
         assert params == ["self", "session", "store", "warnings"], cls.__name__
+
+
+def test_read_live_markers_takes_warnings_on_every_backend():
+    """The preview asks every backend the same way, so it can render WHY
+    markers are silent instead of just omitting them.
+    """
+    import inspect
+
+    from dawbridge.protools_backend import ProToolsBackend
+    from dawbridge.reaper_backend import ReaperBackend
+
+    for cls in (Backend, MockBackend, ReaperBackend, ProToolsBackend):
+        params = inspect.signature(cls.read_live_markers).parameters
+        assert list(params)[:2] == ["self", "warnings"], cls.__name__
+        extra = [n for n, p in params.items() if n not in ("self", "warnings")]
+        assert all(params[n].kind is inspect.Parameter.KEYWORD_ONLY for n in extra), (
+            f"{cls.__name__}: extra params must be keyword-only so the call stays uniform"
+        )
+
+
+def test_the_old_names_still_forward_until_the_callers_move():
+    # cli.py and gui.py still say pull/push; they must keep working, and
+    # they must reach the same code.
+    backend = MockBackend()
+    backend.tracks["aaaaaaaa"] = {"name": "Kick", "clip_ids": set()}
+
+    session = backend.pull(Session(), None)
+
+    assert [t.name for t in session.tracks] == ["Kick"]
+    assert backend.push(session, None) == backend.apply(session, None)
 
 
 # ---- tracks silently disappearing from the shared session -------------

@@ -102,7 +102,7 @@ class Backend(ABC):
         computed from exactly the same reading the push acts on.
         """
 
-    def read_live_markers(self) -> Optional[list["LiveMarker"]]:
+    def read_live_markers(self, warnings: Optional[list[str]] = None) -> Optional[list["LiveMarker"]]:
         """Markers in the running DAW right now, or None.
 
         None means "this DAW cannot tell me", which is NOT the same as []
@@ -118,7 +118,7 @@ class Backend(ABC):
         return None
 
     @abstractmethod
-    def pull(self, session: Session, store, warnings: Optional[list[str]] = None) -> Session:
+    def capture(self, session: Session, store, warnings: Optional[list[str]] = None) -> Session:
         """Read the live DAW and merge its state into `session`, returning
         the updated Session. Mutates session.tracks in place for tagged
         matches; appends newly-adopted tracks/clips for untagged ones.
@@ -136,12 +136,34 @@ class Backend(ABC):
         """
 
     @abstractmethod
-    def push(self, session: Session, store) -> list[str]:
+    def apply(self, session: Session, store) -> list[str]:
         """Apply `session` into the live DAW. `store` is a SharedStore,
         used to resolve Clip.audio_file to a real path for import.
         Returns a list of human-readable warnings (e.g. orphaned clips)
         for the CLI to print - nothing here should be auto-deleted.
         """
+
+
+    # ---- deprecated names, kept only until the callers move ------------
+    #
+    # The methods were named for the direction the DATA moves relative to
+    # the DAW, which is the opposite of the direction the user-facing
+    # commands are named for, so `pull` here meant `push` there and vice
+    # versa. `capture` and `apply` say which way the data goes without
+    # anyone having to pick a reference point - and they're the words this
+    # codebase's own prose already used ("every pull captures the live
+    # mute state; every push applies it").
+    #
+    # These two forward so cli.py and gui.py keep working while their call
+    # sites move; delete them once they have.
+
+    def pull(self, session: Session, store, warnings: Optional[list[str]] = None) -> Session:
+        """Deprecated alias for capture()."""
+        return self.capture(session, store, warnings)
+
+    def push(self, session: Session, store) -> list[str]:
+        """Deprecated alias for apply()."""
+        return self.apply(session, store)
 
 
 class MockBackend(Backend):
@@ -177,7 +199,7 @@ class MockBackend(Backend):
             for bridge_id, data in self.tracks.items()
         ]
 
-    def pull(self, session: Session, store=None, warnings: Optional[list[str]] = None) -> Session:
+    def capture(self, session: Session, store=None, warnings: Optional[list[str]] = None) -> Session:
         from .sync import merge_pulled_track
 
         for bridge_id, data in self.tracks.items():
@@ -186,7 +208,7 @@ class MockBackend(Backend):
                 session.tracks.append(track)
         return session
 
-    def push(self, session: Session, store) -> list[str]:
+    def apply(self, session: Session, store) -> list[str]:
         from .sync import plan_tracks, plan_clips
 
         local_tag_to_name = {tid: data["name"] for tid, data in self.tracks.items()}

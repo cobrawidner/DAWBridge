@@ -34,6 +34,24 @@ def _get_backend(daw: str) -> Backend:
     return ProToolsBackend()
 
 
+def display_name(name: str, daw: str) -> str:
+    """Who to credit for a sync.
+
+    Falls back to the old `gui@reaper` form when nobody has entered a
+    name, so an existing install keeps working and the field is genuinely
+    optional. Kept module-level and pure because this string ends up in
+    the session, in every history listing and in the Discord message -
+    three places where getting it wrong is visible for a long time.
+    """
+    clean = " ".join(name.split())[:40]
+    return f"{clean}@{daw}" if clean else f"gui@{daw}"
+
+
+def short_name(name: str) -> str:
+    """Just the person, for a message that already says which DAW."""
+    return " ".join(name.split())[:40] or "Someone"
+
+
 def _worth_restoring(path: Path) -> bool:
     """False for the empty session a new shared folder starts life with.
 
@@ -83,6 +101,7 @@ class DawBridgeGUI(ttk.Frame):
         config = _load_config()
         self.folder_var = tk.StringVar(value=config.get("folder", ""))
         self.daw_var = tk.StringVar(value=config.get("daw", "reaper"))
+        self.name_var = tk.StringVar(value=config.get("name", ""))
 
         self._build_widgets()
         self._busy = False
@@ -165,10 +184,26 @@ class DawBridgeGUI(ttk.Frame):
                 style="Selector.TRadiobutton", takefocus=True,
             ))
 
-        theme.separator(body).grid(row=2, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        ttk.Label(body, text=theme.tracked("Your name"), style="Legend.TLabel").grid(
+            row=2, column=0, sticky="w", padx=(0, 14), pady=6
+        )
+        # Optional, but it replaces "gui@reaper" everywhere someone is
+        # credited: the status pane, every history entry, the drift
+        # warning, and the Discord message.
+        # Entry and hint share one cell. Given a column of their own, the
+        # hint's width sets column 2 and drags "Browse..." away from the
+        # folder field above it.
+        name_row = ttk.Frame(body, style="Chassis.TFrame")
+        name_row.grid(row=2, column=1, columnspan=2, sticky="w", pady=6)
+        ttk.Entry(name_row, textvariable=self.name_var, width=26).pack(side="left")
+        tk.Label(name_row, text="shown to your collaborator", background=theme.CHASSIS,
+                 foreground=theme.INK_3, font=theme.FONTS["button"]).pack(
+            side="left", padx=(12, 0))
+
+        theme.separator(body).grid(row=3, column=0, columnspan=3, sticky="ew", pady=(14, 0))
 
         button_frame = ttk.Frame(body, style="Chassis.TFrame")
-        button_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        button_frame.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 0))
         # Left to right is the order you actually work in: look at what's
         # waiting, take it, then send yours back.
         self.preview_btn = ttk.Button(button_frame, text="Preview pull", command=self._on_preview)
@@ -192,7 +227,7 @@ class DawBridgeGUI(ttk.Frame):
                                      command=self._on_notifications)
         self.notify_btn.pack(side="left", padx=(8, 0))
 
-        theme.separator(body).grid(row=4, column=0, columnspan=3, sticky="ew", pady=(16, 0))
+        theme.separator(body).grid(row=5, column=0, columnspan=3, sticky="ew", pady=(16, 0))
 
     def _build_readouts(self, body: ttk.Frame) -> None:
         """Session status and the log, both sunk into dark readouts.
@@ -344,7 +379,8 @@ class DawBridgeGUI(ttk.Frame):
         theme.tag_status(self.status_text)
         self.status_text.configure(state="disabled")
 
-        _save_config({"folder": str(folder), "daw": self.daw_var.get()})
+        _save_config({"folder": str(folder), "daw": self.daw_var.get(),
+                      "name": self.name_var.get().strip()})
 
     def _on_publish(self) -> None:
         self._run_async(self._do_publish)
@@ -589,7 +625,8 @@ class DawBridgeGUI(ttk.Frame):
             return
 
         try:
-            restored = store.restore_archived(revision, updated_by="gui@restore")
+            restored = store.restore_archived(
+                revision, updated_by=display_name(self.name_var.get(), "restore"))
         except Exception as exc:
             messagebox.showerror("DAWBridge", f"Restore failed: {exc}", parent=win)
             return
@@ -746,7 +783,8 @@ class DawBridgeGUI(ttk.Frame):
         # was checked before that read, so a partner publishing during it
         # would slip past every guard - this is the last chance to notice.
         try:
-            store.save(session, updated_by=f"gui@{daw}", expected_revision=loaded_revision)
+            store.save(session, updated_by=display_name(self.name_var.get(), daw),
+                       expected_revision=loaded_revision)
         except SharedSessionMoved as exc:
             self.master.after(0, lambda: self._log(f"[push][error] {exc}"))
             self.master.after(0, lambda: self._log(
@@ -769,7 +807,7 @@ class DawBridgeGUI(ttk.Frame):
             self.master.after(0, lambda w=w: self._log(f"[push][warning] {w}"))
 
         self._notify(folder, "publish", notify.describe_publish(
-            who=f"gui@{daw}", daw=daw, revision=session.revision,
+            who=short_name(self.name_var.get()), daw=daw, revision=session.revision,
             tracks=len(session.tracks),
             clips=sum(len(t.clips) for t in session.tracks),
             warnings=len(pull_warnings)))
@@ -818,7 +856,7 @@ class DawBridgeGUI(ttk.Frame):
             self.master.after(0, lambda w=w: self._log(f"[pull][warning] {w}"))
 
         self._notify(folder, "load", notify.describe_load(
-            who=f"gui@{daw}", daw=daw, revision=session.revision))
+            who=short_name(self.name_var.get()), daw=daw, revision=session.revision))
 
     def _ask_confirm_on_main_thread(self, preview, daw: str) -> bool:
         """Ask for confirmation from a worker thread, safely.

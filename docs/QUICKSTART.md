@@ -55,8 +55,11 @@ The buttons sit left to right in the order you use them.
 4. Click **Browse…** and select the shared folder — the one ending in
    `.dawbridge`.
 5. Pick your DAW: **Reaper** or **Pro Tools**. The selected one is highlighted.
+6. Type your name into **Your name**. Optional, but without it every version
+   you publish is credited to "gui@reaper" — including in the history your
+   collaborator reads when trying to work out which version to go back to.
 
-It remembers both next time.
+It remembers all three next time.
 
 ---
 

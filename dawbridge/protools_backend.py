@@ -197,11 +197,11 @@ class ProToolsBackend(Backend):
 
     # ---- markers (Pro Tools memory locations) ---------------------------
 
-    def read_live_markers(self) -> list[LiveMarker] | None:
+    def read_live_markers(self, warnings: list[str] | None = None) -> list[LiveMarker] | None:
         from ptsl import open_engine
 
         with open_engine(company_name=_COMPANY, application_name=_APP) as engine:
-            return self._read_live_markers(engine)
+            return self._read_live_markers(engine, warnings)
 
     def _read_live_markers(self, engine, warnings: list[str] | None = None) -> list[LiveMarker] | None:
         """Memory locations that are markers, as LiveMarkers, or None if
@@ -396,7 +396,7 @@ class ProToolsBackend(Backend):
 
     # ---- pull: live Pro Tools session -> canonical Session --------------
 
-    def pull(self, session: Session, store, warnings: list[str] | None = None) -> Session:
+    def capture(self, session: Session, store, warnings: list[str] | None = None) -> Session:
         from ptsl import open_engine
 
         with open_engine(company_name=_COMPANY, application_name=_APP) as engine:
@@ -819,7 +819,7 @@ class ProToolsBackend(Backend):
 
     # ---- push: canonical Session -> live Pro Tools session --------------
 
-    def push(self, session: Session, store) -> list[str]:
+    def apply(self, session: Session, store) -> list[str]:
         from ptsl import open_engine
         from ptsl.PTSL_pb2 import TrackFormat, TrackTimebase, TrackType
 
