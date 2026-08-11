@@ -15,7 +15,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import checks, syncstate, theme
+from . import checks, notify, syncstate, theme
 from .backend import Backend
 from .model import Session
 from .store import SharedSessionMoved, SharedStore
@@ -70,12 +70,12 @@ class DawBridgeGUI(ttk.Frame):
         # Silently keeps Tk's default icon if assets/dawbridge.ico has
         # not been generated yet - `python tools/build_exe.py --icon-only`.
         theme.apply_window_icon(self.master)
-        # Wide enough that the button row never clips. Measured, not
-        # guessed: the row needs 752px and the body pads 16 each side, so
-        # anything narrower hides whichever button is last - which was
-        # "History...", the one someone reaches for when something has
-        # gone wrong and they are least able to go hunting for it.
-        self.master.minsize(784, 580)
+        # Wide enough that the button row never clips. Measured after
+        # every change, not guessed: the row needs 875px and the body pads
+        # 16 each side. Anything narrower silently hides whichever button
+        # is last, and the last ones are the recovery tools - reached for
+        # exactly when someone is least able to go hunting.
+        self.master.minsize(907, 580)
         self.grid(sticky="nsew")
         self.master.columnconfigure(0, weight=1)
         self.master.rowconfigure(0, weight=1)
@@ -188,6 +188,9 @@ class DawBridgeGUI(ttk.Frame):
         self.check_btn.pack(side="left", padx=(8, 0))
         self.history_btn = ttk.Button(button_frame, text="History...", command=self._on_history)
         self.history_btn.pack(side="left", padx=(8, 0))
+        self.notify_btn = ttk.Button(button_frame, text="Notifications...",
+                                     command=self._on_notifications)
+        self.notify_btn.pack(side="left", padx=(8, 0))
 
         theme.separator(body).grid(row=4, column=0, columnspan=3, sticky="ew", pady=(16, 0))
 
@@ -288,6 +291,7 @@ class DawBridgeGUI(ttk.Frame):
         self.refresh_btn.configure(state=state)
         self.check_btn.configure(state=state)
         self.history_btn.configure(state=state)
+        self.notify_btn.configure(state=state)
 
         colour = theme.READOUT_WARN if busy else theme.READOUT_GOOD
         theme.set_led(self.led, colour)
@@ -350,6 +354,113 @@ class DawBridgeGUI(ttk.Frame):
 
     def _on_load(self) -> None:
         self._run_async(self._do_load)
+
+    def _on_notifications(self) -> None:
+        """Set up the Discord webhook without a terminal.
+
+        The CLI could already do this, which meant the collaborator
+        running the .exe couldn't - the same gap that made the 20-revision
+        archive useless to the person most likely to need it.
+        """
+        folder = self._require_folder()
+        if folder is None:
+            return
+
+        win = tk.Toplevel(self.master)
+        win.title("DAWBridge - notifications")
+        win.configure(background=theme.CHASSIS)
+        win.transient(self.master)
+        win.resizable(False, False)
+
+        body = ttk.Frame(win, style="Chassis.TFrame", padding=(16, 14, 16, 16))
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+
+        ttk.Label(body, wraplength=520, justify="left", text=(
+            "Post a message to a Discord channel whenever either of you publishes "
+            "or loads, so nobody has to remember to say so.\n\n"
+            "In Discord: Server Settings > Integrations > Webhooks > New Webhook. "
+            "Pick a channel, copy the URL, paste it here."
+        )).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
+
+        ttk.Label(body, text=theme.tracked("Webhook URL"), style="Legend.TLabel").grid(
+            row=1, column=0, sticky="w", padx=(0, 14), pady=6)
+        url_var = tk.StringVar(value=notify.webhook_url(folder) or "")
+        entry = ttk.Entry(body, textvariable=url_var, width=52)
+        entry.grid(row=1, column=1, columnspan=2, sticky="ew", pady=6)
+
+        ttk.Label(body, text=theme.tracked("Post on"), style="Legend.TLabel").grid(
+            row=2, column=0, sticky="w", padx=(0, 14), pady=6)
+        events_var = tk.StringVar(
+            value="publish" if (notify.is_enabled_for(folder, "publish")
+                                and not notify.is_enabled_for(folder, "load")) else "both")
+        switch = theme.Segmented(body)
+        switch.grid(row=2, column=1, columnspan=2, sticky="w", pady=6)
+        for label, value in (("Both", "both"), ("Publishes only", "publish")):
+            switch.add(ttk.Radiobutton(switch, text=label, value=value, variable=events_var,
+                                       style="Selector.TRadiobutton", takefocus=True))
+
+        # Feedback reports state, so it belongs on a readout, not the faceplate.
+        bezel = theme.Recess(body)
+        bezel.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        status = tk.Label(bezel.well, background=theme.DISPLAY, foreground=theme.READOUT_INK,
+                          font=theme.FONTS["mono_small"], anchor="w", justify="left",
+                          wraplength=520, padx=10, pady=8)
+        bezel.mount(status)
+
+        def say(text: str, colour: str = theme.READOUT_INK) -> None:
+            status.configure(text=text, foreground=colour)
+
+        say("Configured. Both machines post to this channel."
+            if notify.webhook_url(folder) else "Not set up yet.")
+
+        def save(and_test: bool = False) -> None:
+            url = url_var.get().strip()
+            if not url:
+                say("Paste a webhook URL first.", theme.READOUT_WARN)
+                return
+            reason = notify.reject_reason(url)
+            if reason:
+                say(reason, theme.READOUT_CRIT)
+                return
+            config = notify.load_config(folder)
+            config["discord_webhook"] = url
+            config["events"] = ["publish", "load"] if events_var.get() == "both" else ["publish"]
+            try:
+                notify.save_config(folder, config)
+            except Exception as exc:  # noqa: BLE001 - surfaced, never raised at the user
+                say(f"Could not save: {exc}", theme.READOUT_CRIT)
+                return
+            self._log(f"[notify] saved to {notify.config_path(folder)}")
+            if not and_test:
+                say("Saved. This lives in the shared folder, so your collaborator's "
+                    "copy will post here too.", theme.READOUT_GOOD)
+                return
+            problem = notify.post(folder, "DAWBridge test message - notifications are working.")
+            if problem:
+                say(problem, theme.READOUT_CRIT)
+            else:
+                say("Test message sent - check the channel.", theme.READOUT_GOOD)
+
+        def turn_off() -> None:
+            try:
+                notify.config_path(folder).unlink(missing_ok=True)
+            except Exception as exc:  # noqa: BLE001
+                say(f"Could not turn off: {exc}", theme.READOUT_CRIT)
+                return
+            url_var.set("")
+            say("Turned off for this shared folder.", theme.READOUT_INK)
+            self._log("[notify] notifications turned off.")
+
+        row = ttk.Frame(body, style="Chassis.TFrame")
+        row.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        ttk.Button(row, text="Save", command=save).pack(side="left")
+        ttk.Button(row, text="Save and send test",
+                   command=lambda: save(and_test=True)).pack(side="left", padx=(8, 0))
+        theme.separator(row, orient="vertical").pack(side="left", fill="y", padx=14)
+        ttk.Button(row, text="Turn off", command=turn_off).pack(side="left")
+        ttk.Button(row, text="Close", command=win.destroy).pack(side="left", padx=(8, 0))
+        entry.focus_set()
 
     def _notify(self, folder: Path, event: str, message: str) -> None:
         """Tell Discord, if it's set up. Runs on the worker thread.

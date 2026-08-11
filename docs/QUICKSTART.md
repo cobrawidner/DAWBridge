@@ -36,6 +36,7 @@ out to it — the same way those words work in any other tool.
 | **Refresh status** | Re-reads the shared folder and shows what's there right now. |
 | **Check folder** | Looks for problems — missing audio, conflicted copies, overlapping clips. Changes nothing. |
 | **History...** | The last 20 versions of the shared session, and a way to put one back. |
+| **Notifications...** | Set up a Discord channel that gets told whenever either of you publishes or loads. |
 
 If you remember nothing else: **pull to get theirs, push to send yours.**
 
@@ -163,11 +164,15 @@ DAWBridge can post to a Discord channel every time either of you publishes or
 loads, so nobody has to remember to say so.
 
 In Discord: **Server Settings → Integrations → Webhooks → New Webhook**, pick
-the channel, and copy the URL. Then, once, from the developer setup:
+the channel, and copy the URL.
+
+Then in DAWBridge click **Notifications…**, paste the URL, and press **Save and
+send test**. If the message appears in your channel, you're done.
+
+Same thing from the command line, if you have the developer setup:
 
 ```bash
-python -m dawbridge.cli notify --folder "<the shared folder>" --webhook "<the url>"
-python -m dawbridge.cli notify --folder "<the shared folder>" --test
+python -m dawbridge.cli notify --folder "<the shared folder>" --webhook "<the url>" --test
 ```
 
 Set it up once and **both** of you start posting — the setting lives in the
@@ -179,7 +184,7 @@ never include file paths, audio, or anything from inside your session. If
 Discord is unreachable the sync still completes normally and the app says so
 in the log.
 
-To stop: `--off`. To post only on publishes: `--events publish`.
+To stop, or to post only on publishes, use the same **Notifications…** window.
 
 ---
 
