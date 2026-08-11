@@ -83,16 +83,20 @@ Artifact with the **same `file_path`** and favicon to redeploy to the same
 URL. If you don't — a cloud checkout, a later session — say so in your report
 rather than publishing to a new URL, which would silently fork the spec.
 
-## Open design questions
+## Settled since this brief was written
 
-- **The logo mark is not chosen yet.** Four candidates are in the artifact:
-  A · Span (recommended), B · Crossfeed, C · Matched, D · Waveform. The user
-  picks. Until they do, build the theming that doesn't depend on the mark, and
-  make swapping the mark a one-line change.
-- Type is currently 14px for modern readability; period-correct would be
-  10–11px. Flagged to the user, not yet decided.
-- An earlier feather logo and a Win9x drawbridge SVG (`assets/dawbridge_logo.svg`)
-  were both tried and set aside. Don't resurrect either without being asked.
+- **The mark is `i2` in signal orange** - two triangles facing across a lit
+  seam, on its own dark tile. `theme.COLOURWAY` is the one line that changes
+  it; `.ico` and `dawbridge_mark.svg` are build outputs needing
+  `python tools/build_exe.py --icon-only` after any change.
+- **There is no light theme.** Dropped on measured contrast: every accent
+  fails on a light chassis, steel blue included. See §02 of the artifact.
+- **The app is styled.** `theme.py` and `gui.py` are built out - segmented
+  DAW selector, recessed readouts snapped to whole text rows, log tagging.
+  Don't treat restyling as open work.
+- An earlier feather logo and a Win9x drawbridge SVG
+  (`assets/dawbridge_logo.svg`) were tried and set aside. Don't resurrect
+  either without being asked.
 
 ## File what you notice
 
@@ -112,11 +116,9 @@ behaves when it's really running.
 
 ## Files you own
 
-- `dawbridge/gui.py` — **presentation only.** It is currently unstyled `ttk`
-  with default theming. Restyling it is the main open work: a `ttk.Style`
-  layer, the recessed readout treatment for the status and log panes, hairline
-  separators, a proper type scale, the window icon.
-- A new `dawbridge/theme.py` if the styling deserves its own module — it does.
+- `dawbridge/gui.py` — **presentation only.** Style widgets; never touch the
+  threading model or the sync calls (see below).
+- `dawbridge/theme.py` — the palette, the ttk styles, the mark geometry.
 - `assets/` — logo source, `.ico` generation.
 - `tools/build_exe.py` — only the icon wiring (`--icon`, and `sys._MEIPASS`
   resolution for any bundled asset).

@@ -29,11 +29,14 @@ is doable either way. What you cannot do from a checkout is verify anything
 against a live DAW; say so plainly rather than reasoning your way to a
 conclusion you can't test.
 
-Confusingly, the commands are named from the DAW's point of view, not the
-folder's: **pull** means "read my DAW and publish it to the shared folder",
-**push** means "write the shared folder's session into my DAW". This naming
-has already been flagged as confusing and is unresolved — note it, don't
-unilaterally rename it.
+The commands are named from the user's point of view: **pull** brings the
+shared session into your DAW, **push** sends your work out to the shared
+folder. Settled, and recorded in the backlog as do-not-re-litigate.
+
+Internally the directions still read the other way - a publish *reads* from
+the DAW - so `cmd_publish` backs the `push` command and `cmd_load` backs
+`pull`. `Backend.pull`/`Backend.push` are queued for rename to
+`capture`/`apply` for exactly this reason.
 
 ### The semantics that are deliberate, not accidental
 
