@@ -28,7 +28,17 @@ tried and failed the once it wasn't.
 
 ---
 
-## Blocked on Travis
+## Input needed
+
+Everything waiting on Travis, in one place. **Blocking** stops work;
+**Proposed** doesn't - it's ideas parked until he wants to triage them.
+
+Anyone - main session, any agent - may add to Proposed. The rule is that
+a proposal carries its evidence: what problem it solves, where the idea
+came from, and roughly what it costs. An idea with no evidence is a
+preference, and preferences belong in conversation, not on a list.
+
+### Blocking
 
 - **How does the collaborator receive the `.exe`?** And do they get
   `docs/QUICKSTART.md` with it? Unanswered, and it is now the last thing
@@ -46,6 +56,72 @@ tried and failed the once it wasn't.
   references audio directly in the Dropbox folder; Pro Tools copies into
   its own session folder. So a Reaper project breaks if the folder moves
   or goes offline, and Reaper writes peak files into the shared folder.
+
+### Proposed - awaiting triage
+
+Nothing here is agreed. Ordered by value-per-effort as I see it.
+
+**1. A note attached to each publish.**
+*What.* A one-line message saved with the revision - "redid the second verse
+vocal, moved the bridge back 4 bars".
+*Why.* A revision records who and when but never why. This makes `History...`
+legible, gives the Discord message something worth reading, and tells your
+collaborator what they're about to pull before they pull it.
+*Evidence.* Every recovery path we built assumes someone can identify the
+right revision. Right now they identify it by track count.
+*Effort.* Small - one model field, one text box, one line in the notification.
+*Recommendation.* Do it first. Highest value per hour on this list.
+
+**2. "What changed since I last looked."**
+*What.* A view of the difference between the shared session now and the
+revision this machine last saw.
+*Why.* It's the question you have every single time, and neither front end
+can answer it.
+*Evidence.* The data already exists - `archive/` holds the old revisions and
+`syncstate` records which one you last saw. No DAW needed, no new storage.
+*Effort.* Small-to-medium. Pure computation over two files already on disk.
+*Recommendation.* Do it with #1; a note makes the diff far more useful.
+
+**3. Notice when the shared session moves, without being asked.**
+*What.* Poll `session.json` every ~30s; the status lamp reports "Conner
+published r37, two minutes ago."
+*Why.* Turns DAWBridge from a thing you operate into a thing that tells you
+something. Two people working blind at the same time is the root of the
+whole overwrite problem.
+*Evidence.* `session.json` is 4KB; polling it is free next to the audio.
+*Effort.* Small.
+
+**4. Publish only the tracks you changed.**
+*What.* Scope a publish to selected tracks instead of replacing everything.
+*Why.* Every "you overwrote my work" failure traces to wholesale replace.
+This removes the class structurally rather than guarding against it.
+*Evidence.* Tracks already carry bridge ids, so this is not a merge engine -
+there is nothing to reconcile, only "replace these three, leave the rest".
+*Effort.* Large, and it revises a decision recorded below as settled.
+*Recommendation.* Discuss before building. It's the biggest idea here and
+the one most likely to be right.
+
+**5. A reference bounce.**
+*What.* Publish a rough mixdown alongside the session.
+*Why.* Lets the other person hear where you got to without loading anything -
+and catches "your version sounds wrong on my end" before a session is opened.
+*Evidence.* The one idea here that's specific to music rather than to file
+sync.
+*Effort.* Medium; both DAWs can render, neither API makes it trivial.
+
+**6. "Undo my last publish."**
+*What.* One button that restores the revision immediately before yours.
+*Why.* `History...` already makes this possible, but it asks a panicking
+person to understand revisions first.
+*Effort.* Small - it's `restore_archived` with the argument chosen for them.
+
+**7. Tell an out-of-date copy where to get the new one.**
+*What.* A version check against the repo or the shared folder.
+*Why.* Two people on different builds is ordinary. The format guard already
+tells the older one to update; nothing tells them how.
+*Effort.* Small.
+
+---
 
 ## Blocked on a live DAW
 

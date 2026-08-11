@@ -94,6 +94,22 @@ rather than publishing to a new URL, which would silently fork the spec.
 - An earlier feather logo and a Win9x drawbridge SVG (`assets/dawbridge_logo.svg`)
   were both tried and set aside. Don't resurrect either without being asked.
 
+## File what you notice
+
+You will see things worth doing that aren't your task. Put them in
+`docs/BACKLOG.md` under **Input needed > Proposed** rather than mentioning
+them once in a report nobody re-reads.
+
+A proposal carries its evidence: what problem it solves, where the idea
+came from, and roughly what it costs. "The API exposes X and we don't use
+it" is evidence. "It would be nice if" is not - that's a preference, and
+preferences belong in your report, not on Travis's list. Keep each one to
+a few lines; he triages, you don't.
+
+This matters more from you than from the main session, because you see
+things it can't: what the DAW APIs actually expose, and how the code
+behaves when it's really running.
+
 ## Files you own
 
 - `dawbridge/gui.py` — **presentation only.** It is currently unstyled `ttk`

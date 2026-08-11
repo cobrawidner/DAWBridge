@@ -99,6 +99,22 @@ checklist and not exhaustive:
   folder, nothing set up. Where does that go wrong? Is there anything to
   read?
 
+## File what you notice
+
+You will see things worth doing that aren't your task. Put them in
+`docs/BACKLOG.md` under **Input needed > Proposed** rather than mentioning
+them once in a report nobody re-reads.
+
+A proposal carries its evidence: what problem it solves, where the idea
+came from, and roughly what it costs. "The API exposes X and we don't use
+it" is evidence. "It would be nice if" is not - that's a preference, and
+preferences belong in your report, not on Travis's list. Keep each one to
+a few lines; he triages, you don't.
+
+This matters more from you than from the main session, because you see
+things it can't: what the DAW APIs actually expose, and how the code
+behaves when it's really running.
+
 ## How to work
 
 1. **Audit before you build.** Report what you found with evidence — file and
