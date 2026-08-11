@@ -33,12 +33,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller pillow
-          pip install -e .
+          pip install -e ".[dev]"
 
       - name: Run the tests
-        # A build nobody can trust is worse than no build. The suite runs
-        # without a DAW open, which is exactly why it can run here.
+        # A build nobody can trust is worse than no build. The suite needs
+        # no DAW running, but it does need the two client libraries - they
+        # supply real protobuf types and call shapes, and without them 20
+        # tests error rather than skip. Verified by simulating a bare
+        # runner before this workflow was ever triggered.
         run: python -m pytest -q
 
       - name: Build the exe

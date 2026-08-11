@@ -9,6 +9,19 @@ dependencies = []
 #   pip install py-ptsl        # for the Pro Tools backend
 # Neither is required just to run the tests or use the CLI's `status` command.
 
+[project.optional-dependencies]
+# Everything needed to run the suite and build the exe. The DAW client
+# libraries are here because the tests exercise real protobuf types and
+# reapy's own call shapes - they install fine without either DAW present,
+# which is what lets CI run the whole suite on a bare runner.
+dev = [
+    "pytest",
+    "pyinstaller",
+    "pillow",
+    "python-reapy",
+    "py-ptsl",
+]
+
 [project.scripts]
 dawbridge = "dawbridge.cli:main"
 
