@@ -50,7 +50,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .backend import Backend, LiveClip, LiveMarker, LiveTrack
+from .backend import Backend, LiveClip, LiveMarker, LiveTrack, missing_client_library_reason
 from .model import Clip, Marker, Session, Track, new_id
 from .sync import (
     claim_live_id,
@@ -241,16 +241,106 @@ def _take_source_path(RPR, take) -> str:
         return ""
 
 
+#: reapy's own ExtState read uses this timeout against the same port, so
+#: matching it keeps the probe's answer and reapy's answer in step - a
+#: probe that waited longer than reapy does would claim Reaper is there
+#: in exactly the cases where reapy then can't reach it.
+_WEB_INTERFACE_TIMEOUT_SECONDS = 0.5
+
+
+def _reaper_web_interface_answers(reapy) -> bool:
+    """Whether Reaper's ReaScript web interface responds on localhost.
+
+    This is the one thing observable from outside that means "Reaper is
+    definitely running", which is what lets unavailable_reason separate
+    a closed Reaper from a running one whose bridge is off.
+
+    Two deliberate choices:
+      - urllib, the same way reapy reaches that port, rather than a raw
+        socket. If a proxy or firewall rule would break reapy's request,
+        it breaks this one too, and the probe stays in agreement with
+        the thing it is predicting.
+      - a read-only GET of an ext state key, NOT reapy's
+        `activate_reapy_server` sitting next to it, which performs an
+        action inside Reaper. Asking "are you there?" must not also run
+        something in the user's DAW.
+
+    Any failure to get an answer is the same answer - False - because
+    this is a probe rather than an operation: there is no partial
+    success to preserve and nothing downstream that a distinction would
+    change.
+    """
+    from urllib.request import urlopen
+
+    port = getattr(getattr(reapy, "config", None), "WEB_INTERFACE_PORT", 2307)
+    url = f"http://localhost:{port}/_/GET/EXTSTATE/reapy/server_port"
+    try:
+        with urlopen(url, timeout=_WEB_INTERFACE_TIMEOUT_SECONDS):
+            return True
+    except Exception:
+        return False
+
+
 class ReaperBackend(Backend):
     name = "reaper"
 
     def is_available(self) -> bool:
+        return self.unavailable_reason() is None
+
+    def unavailable_reason(self) -> str | None:
+        """Which of the three unavailable cases this actually is - see
+        Backend.unavailable_reason.
+
+        Only two of the three are distinguishable here, and the third
+        sentence says so rather than guessing:
+
+          - `import reapy` raises -> the library isn't installed. Clean.
+          - Reaper's web interface answers on 2307, but reapy still
+            can't reach its own server -> Reaper IS running and the
+            bridge is the problem. Clean, because only a running Reaper
+            can answer that port.
+          - the web interface doesn't answer -> Reaper is closed, OR it
+            is open and the one-time reapy setup was never done in it
+            (that setup is what creates the web interface in the first
+            place). Nothing reapy exposes separates those two, and this
+            method will not pretend otherwise: `dist_api_is_enabled()`
+            is False for both.
+
+        Note the reconnect. `dist_api_is_enabled()` reports a decision
+        reapy made once, when it was first imported: start Reaper after
+        DAWBridge and it stays False forever, which would have this
+        method confidently reporting a bridge failure that isn't real.
+        The retry only runs when the web interface has already answered,
+        so it can't hang on a Reaper that isn't there.
+        """
         try:
             import reapy
+        except ImportError as exc:
+            return missing_client_library_reason("Reaper", "reapy", "python-reapy", exc)
 
-            return reapy.is_inside_reaper() or reapy.dist_api_is_enabled()
+        if reapy.is_inside_reaper() or reapy.dist_api_is_enabled():
+            return None
+
+        if not _reaper_web_interface_answers(reapy):
+            return (
+                "Reaper isn't answering on localhost:2307. Either it isn't running, or "
+                "it's running without the one-time reapy setup - DAWBridge can't tell "
+                "those apart. If Reaper is open, run: python -c \"import reapy; "
+                "reapy.configure_reaper()\" and restart Reaper."
+            )
+
+        try:
+            reapy.reconnect()
         except Exception:
-            return False
+            pass  # the message below is already the right one
+        if reapy.dist_api_is_enabled():
+            return None
+
+        return (
+            "Reaper is running, but its reapy bridge isn't answering - the scripting "
+            "connection, not Reaper itself, is what's missing. Run: python -c \"import "
+            "reapy; reapy.configure_reaper()\" and restart Reaper."
+        )
 
     def project_identity(self) -> str:
         from reapy import reascript_api as RPR

@@ -111,7 +111,7 @@ import re
 from pathlib import Path
 
 from . import audiofile
-from .backend import Backend, LiveClip, LiveMarker, LiveTrack
+from .backend import Backend, LiveClip, LiveMarker, LiveTrack, missing_client_library_reason
 from .model import Clip, Marker, Session, Track, new_id
 from .sync import (
     claim_live_id,
@@ -131,18 +131,72 @@ from .tagging import parse_tag, strip_tag, tag
 _COMPANY = "DAWBridge"
 _APP = "DAWBridge Agent"
 
+
+def _is_grpc_unavailable(exc: BaseException) -> bool:
+    """Whether `exc` is gRPC's "nothing is listening there" status.
+
+    Read through duck-typing rather than `except grpc.RpcError` so this
+    file still needs no direct grpc import - grpc arrives only as a
+    dependency of py-ptsl, and importing it here would turn "py-ptsl
+    isn't installed" into a second, different ImportError at module
+    load, which is precisely the confusion this code exists to remove.
+    """
+    code = getattr(exc, "code", None)
+    if not callable(code):
+        return False
+    try:
+        return getattr(code(), "name", "") == "UNAVAILABLE"
+    except Exception:
+        return False
+
+
 class ProToolsBackend(Backend):
     name = "protools"
 
     def is_available(self) -> bool:
+        return self.unavailable_reason() is None
+
+    def unavailable_reason(self) -> str | None:
+        """Which of the three unavailable cases this actually is - see
+        Backend.unavailable_reason.
+
+        The three are told apart by where the attempt fails:
+
+          - `import ptsl` raises          -> the library isn't installed.
+          - the gRPC call comes back      -> nothing is listening on
+            UNAVAILABLE                      localhost:31416.
+          - anything else                 -> something answered and then
+                                             refused us, so Pro Tools is
+                                             up and the problem is the
+                                             scripting connection itself.
+
+        Verified against a closed Pro Tools on 2026-08-11: the second
+        case is a `grpc._channel._InactiveRpcError` whose `code()` is
+        `StatusCode.UNAVAILABLE` ("ConnectEx: Connection refused"). The
+        third is unverified against a live refusal - it is the honest
+        default for "the port answered but the command didn't", not a
+        case anyone has reproduced.
+        """
         try:
             from ptsl import open_engine
+        except ImportError as exc:
+            return missing_client_library_reason("Pro Tools", "ptsl", "py-ptsl", exc)
 
+        try:
             with open_engine(company_name=_COMPANY, application_name=_APP) as engine:
                 engine.ptsl_version()
-            return True
-        except Exception:
-            return False
+            return None
+        except Exception as exc:
+            if _is_grpc_unavailable(exc):
+                return (
+                    "Pro Tools isn't answering on localhost:31416, so it doesn't look "
+                    "like it's running - open your session in Pro Tools and try again."
+                )
+            return (
+                f"Pro Tools is running but refused DAWBridge's scripting connection "
+                f"({type(exc).__name__}: {exc}). Check that Pro Tools' scripting access "
+                f"is enabled and that no dialog is waiting for you in Pro Tools."
+            )
 
     def project_identity(self) -> str:
         from ptsl import open_engine

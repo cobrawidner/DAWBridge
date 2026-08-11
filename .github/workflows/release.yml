@@ -46,7 +46,18 @@ jobs:
       - name: Build the exe
         run: python tools/build_exe.py
 
+      # Every run leaves a downloadable exe, including a manual one. The
+      # Release step below only fires for a tag, so without this a
+      # workflow_dispatch build produced nothing you could actually get at.
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: DAWBridge-exe
+          path: dist/DAWBridge.exe
+          if-no-files-found: error
+
       - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |

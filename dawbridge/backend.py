@@ -71,6 +71,34 @@ class LiveTrack:
         return {c.bridge_id for c in self.clips if c.bridge_id}
 
 
+def missing_client_library_reason(daw: str, module: str, pip_name: str, exc: ImportError) -> str:
+    """The one sentence to print when a DAW's client library isn't here.
+
+    Split out because both backends have to say the same thing about two
+    different packages, and because this case is invisible from the end
+    user's side: the shipped .exe bundles both libraries (PyInstaller
+    collects them), so only a source install or a dev checkout can reach
+    it. Saying "is Pro Tools open?" to someone whose real problem is a
+    missing pip package sends them to look at the one place that cannot
+    help them - which is the whole reason unavailable_reason exists.
+    """
+    missing = (getattr(exc, "name", None) or module).split(".")[0]
+    if missing == module:
+        return (
+            f"{daw} support needs the {pip_name} library, and it isn't installed in this "
+            f"Python. Install it with: pip install {pip_name} "
+            f"(the packaged DAWBridge.exe already bundles it, so this only affects "
+            f"running from source)."
+        )
+    # ptsl/reapy imported but one of THEIR dependencies didn't - a broken
+    # or half-finished install, which reads identically to "not installed"
+    # unless we say which module actually went missing.
+    return (
+        f"{daw} support could not import {pip_name}: {missing!r} is missing ({exc}). "
+        f"Reinstall it with: pip install --force-reinstall {pip_name}"
+    )
+
+
 class Backend(ABC):
     name: str = "backend"
 
@@ -79,7 +107,45 @@ class Backend(ABC):
         """Whether the DAW is reachable right now (running + scripting
         enabled). Callers should check this before pull/push and give the
         user a clear error rather than a stack trace.
+
+        Real backends express this as `unavailable_reason() is None` so
+        the two answers cannot drift apart; it stays the abstract method
+        because every caller and every test double already speaks it.
         """
+
+    def unavailable_reason(self) -> Optional[str]:
+        """WHY this DAW can't be reached, as one plain sentence, or None
+        when it can.
+
+        `is_available()` collapses three genuinely different situations
+        into one False:
+
+          1. the client library (py-ptsl / python-reapy) isn't installed,
+          2. the DAW isn't running,
+          3. the DAW is running but its scripting bridge isn't answering.
+
+        Only (2) is what "is it open and is scripting enabled?" describes,
+        so someone running from source without py-ptsl was told to go and
+        check Pro Tools, where there was nothing to find. This method is
+        the answer to that: front ends print it verbatim.
+
+        The returned sentence names its own DAW ("Pro Tools isn't
+        answering...") and is safe to print on its own - a caller should
+        NOT prefix it with the backend name. Where a case genuinely can't
+        be told apart from another, the sentence says so rather than
+        picking the likelier one and sounding certain.
+
+        Concrete, not abstract, so the duck-typed backends in the test
+        suite and any future backend keep working: the default answers
+        from is_available() with the same wording the front ends used
+        before this existed.
+        """
+        if self.is_available():
+            return None
+        return (
+            f"{self.name} doesn't look reachable right now - is it open and is "
+            f"scripting enabled?"
+        )
 
     def project_identity(self) -> str:
         """Path of the local project/session this DAW currently has open.
