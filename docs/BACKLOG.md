@@ -91,7 +91,7 @@ whole overwrite problem.
 *Evidence.* `session.json` is 4KB; polling it is free next to the audio.
 *Effort.* Small.
 
-**4. Publish only the tracks you changed.**
+**4. Publish only the tracks you changed.** — **APPROVED 2026-08-10, in progress**
 *What.* Scope a publish to selected tracks instead of replacing everything.
 *Why.* Every "you overwrote my work" failure traces to wholesale replace.
 This removes the class structurally rather than guarding against it.
@@ -273,6 +273,11 @@ Recorded so nobody spends a session rediscovering the reasoning.
 
 - **Publishing replaces wholesale. There is no merge.** Deliberate
   simplification. Don't build a merge engine.
+  **Being revised, deliberately (2026-08-10).** Travis approved publishing
+  only the tracks you changed. This is still not a content merge - no clip
+  or take is ever reconciled - it only decides *which tracks a publish is
+  allowed to touch*. The wholesale rule stays true inside any track a
+  publish does touch.
 - **Pushing into a DAW never deletes.** Clips present in the DAW but not in
   the shared session are left alone and reported as orphans.
 - **Identity lives in DAW-native names** (`Lead Vocal #a1b2c3d4`). It's the
