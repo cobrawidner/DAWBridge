@@ -18,6 +18,10 @@ venv/
 .dawbridge_state.json
 .dawbridge_gui.json
 
+# Holds a Discord webhook URL - anyone with it can post to the channel.
+# It belongs in the shared folder, never in version control.
+notify.json
+
 # Never the shared session folder itself. Its audio is hundreds of MB and
 # it is Dropbox's job, not git's.
 *.dawbridge/

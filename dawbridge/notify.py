@@ -141,6 +141,11 @@ def post(root: Path, message: str, sender=None) -> Optional[str]:
 def _send(url: str, message: str) -> None:
     payload = json.dumps({
         "content": message,
+        # Post under the app's name rather than whatever the webhook was
+        # called when it was created. The avatar is set in Discord's own
+        # webhook settings - it can't be supplied from here without
+        # hosting the image somewhere public.
+        "username": "DAWBridge",
         # Discord renders @everyone in content unless told not to; a sync
         # notification pinging a whole server would get this switched off
         # within a day.
