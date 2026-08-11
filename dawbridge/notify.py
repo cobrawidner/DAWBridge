@@ -103,17 +103,46 @@ def reject_reason(url: str) -> Optional[str]:
     return None
 
 
+_DAW_LABELS = {"reaper": "Reaper", "protools": "Pro Tools"}
+
+
+def daw_label(daw: str) -> str:
+    return _DAW_LABELS.get(daw, daw)
+
+
+def project_name(root) -> str:
+    """The project's name, taken from the shared folder itself.
+
+    `Session.name` would be the obvious source and is useless: neither
+    backend captures it, so every session reads 'Untitled'. The folder is
+    what people actually named the thing -
+    ".../Shady Grove/Shady Grove.dawbridge" becomes "Shady Grove".
+
+    Matters most when several projects post to one channel, where
+    "published r36" with nothing attached to it is unreadable.
+    """
+    leaf = Path(root).resolve().name
+    if leaf.lower().endswith(".dawbridge"):
+        leaf = leaf[: -len(".dawbridge")]
+    return leaf.strip() or "DAWBridge"
+
+
+def _prefix(project: str) -> str:
+    return f"**{project}** - " if project else ""
+
+
 def describe_publish(who: str, daw: str, revision: int, tracks: int, clips: int,
-                     warnings: int = 0) -> str:
-    line = (f"**{who}** published **r{revision}** from {daw} - "
-            f"{tracks} track(s), {clips} clip(s)")
+                     warnings: int = 0, project: str = "") -> str:
+    line = (f"{_prefix(project)}{who} published **r{revision}** from "
+            f"{daw_label(daw)} - {tracks} track(s), {clips} clip(s)")
     if warnings:
         line += f" - {warnings} warning(s)"
     return line + "\nPull from Bridge to pick it up."
 
 
-def describe_load(who: str, daw: str, revision: int) -> str:
-    return f"**{who}** loaded **r{revision}** into {daw}"
+def describe_load(who: str, daw: str, revision: int, project: str = "") -> str:
+    return (f"{_prefix(project)}{who} loaded **r{revision}** into "
+            f"{daw_label(daw)}")
 
 
 def post(root: Path, message: str, sender=None) -> Optional[str]:

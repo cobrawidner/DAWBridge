@@ -205,7 +205,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
             who=getpass.getuser(), daw=args.daw, revision=session.revision,
             tracks=len(session.tracks),
             clips=sum(len(t.clips) for t in session.tracks),
-            warnings=len(pull_warnings)))
+            warnings=len(pull_warnings),
+            project=notify.project_name(Path(args.folder))))
         print(f"[dawbridge][notify] {problem}" if problem
               else "[dawbridge][notify] told Discord")
     return 0
@@ -274,7 +275,8 @@ def cmd_load(args: argparse.Namespace) -> int:
 
     if notify.is_enabled_for(Path(args.folder), "load"):
         problem = notify.post(Path(args.folder), notify.describe_load(
-            who=getpass.getuser(), daw=args.daw, revision=session.revision))
+            who=getpass.getuser(), daw=args.daw, revision=session.revision,
+            project=notify.project_name(Path(args.folder))))
         print(f"[dawbridge][notify] {problem}" if problem
               else "[dawbridge][notify] told Discord")
     return 0

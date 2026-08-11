@@ -123,6 +123,98 @@ tells the older one to update; nothing tells them how.
 
 ---
 
+*8-13 come from reading the API manifests against the use case: 159 distinct
+PTSL commands (DAWBridge calls 19) and 727 ReaScript functions reachable
+through reapy. Each says what exists, what we don't call, and what it would
+buy two people who mostly want to know what the other did.*
+
+**8. Keep a copy of each bridge id somewhere the user can't edit it.**
+*What.* Alongside the id in the name, write it to Reaper's per-object extended
+state (`P_EXT:` on tracks and items) and fall back to it when a name has lost
+its tag.
+*Why.* Identity lives only in a visible name today. Someone who tidies
+"Lead Vocal #a1b2c3d4" back to "Lead Vocal" silently orphans the track - the
+next pull adopts it as new and their partner collects a duplicate. Nothing can
+warn, because a missing tag is indistinguishable from a genuinely new track.
+*Evidence.* Verified live: `GetSetMediaTrackInfo_String(track, "P_EXT:db_id", ...)`
+and the item equivalent round-trip through reapy - read back with a decoy
+buffer to prove it isn't an echo, an unset key returns empty, and the value
+**survived renaming the track**. Reaper persists it in the .rpp.
+*Effort.* Medium: write on adopt, read as fallback, and decide what to do when
+name and ext state disagree.
+*Recommendation.* Strongest on this list. Explicitly NOT a change to
+"identity lives in DAW-native names" - Pro Tools has no equivalent, so names
+stay the cross-DAW mechanism. This is a Reaper-side safety net under it.
+
+**9. Track colours.**
+*What.* Carry a track's colour across the bridge.
+*Why.* Colour is how musicians say "these four are the drums". It is the
+cheapest possible answer to "what did they do", and it needs no explaining to
+someone non-technical.
+*Evidence.* Reaper's `I_CUSTOMCOLOR` reads and writes (verified live on the
+scratch project). PTSL has `SetTrackColor` and `GetColorPalette`, neither
+called. `Track` has no colour field.
+*Effort.* Small, plus one judgement call: Reaper stores a native RGB integer
+and Pro Tools a palette index, so the mapping is approximate either way.
+*Recommendation.* A good first pleasant thing after all the correctness work.
+Visible, cheap, and it cannot endanger audio.
+
+**10. Say when a Pro Tools track has alternate playlists.**
+*What.* On pull, count playlists per track and warn that only the active one
+crosses.
+*Why.* A comped vocal can sit on ten playlists. The text export shows only the
+active one, so DAWBridge publishes a single take and says nothing - the partner
+never learns the alternates exist, and a later push can look like the comp was
+lost.
+*Evidence.* `GetTrackPlaylists` and `GetPlaylistElements` exist in PTSL and are
+unused. Exactly the same family as the loop and region warnings already shipped.
+*Effort.* Small - read the count, add a warning.
+*Recommendation.* Do the warning. Do NOT attempt to sync playlists: Reaper's
+take lanes are not equivalent, and mapping them is a merge engine wearing a hat.
+
+**11. Settle whether session start time offsets every position.**
+*What.* An investigation, not a feature. Does a Pro Tools session starting at
+01:00:00:00 publish its clips an hour out?
+*Why.* Pro Tools sessions conventionally start at one hour, not zero.
+DAWBridge stores seconds and takes positions from the text export's sample
+columns. If those columns are relative to session start, every position from
+such a session is wrong by 3600s - silently, and consistently enough to look
+deliberate rather than broken.
+*Evidence.* `GetSessionStartTime` / `SetSessionStartTime` exist and are unused.
+Every live test so far used a scratch session starting at `00:00:00:00.00`, so
+this case has never once been exercised. Genuinely unknown, either way.
+*Effort.* Small to settle: set a scratch session to 01:00:00:00, place a clip
+at a known point, pull, compare. Unknown to fix, if it needs fixing.
+*Recommendation.* Settle it before anyone else relies on it. It either becomes
+a bug fix or a line in Decided.
+
+**12. We could sync automation, and shouldn't - but the reason on file is wrong.**
+*What.* `model.py` says automation is excluded because PTSL cannot write it.
+That is no longer true, and a wrong reason invites someone to "fix" it.
+*Why.* The honest reason is scope: curves are mix, not arrangement, and the
+decided position is that each side owns their own mix. That reason survives
+contact with the API; "impossible" doesn't.
+*Evidence.* `SetTrackControlBreakpoints`, `GetTrackControlBreakpoints` and
+`GetTrackControlInfo` are all in the protocol and unused. Reaper exposes 41
+envelope functions.
+*Effort.* Correcting the docstring: minutes. The feature: large, and I would
+argue against it.
+*Recommendation.* Correct the docstring and move automation into Decided as
+out-of-scope-by-choice. Do not build it.
+
+**13. Let Pro Tools tell us it changed, rather than asking it.**
+*What.* Subscribe to PTSL events so DAWBridge knows the local session has moved
+since the last publish.
+*Why.* A different question from #3, which watches the shared folder for the
+partner. This watches your OWN DAW and answers "you have work you haven't
+published yet" - the other half of not losing work, and the half nobody is
+told about today.
+*Evidence.* `SubscribeToEvents`, `PollEvents` and `UnsubscribeFromEvents` exist
+in PTSL and are unused.
+*Effort.* Medium, and Pro Tools only - Reaper would need a timer, so the two
+sides would behave differently, which is its own cost.
+*Recommendation.* Only after #3. If #3 lands and feels like enough, drop this.
+
 ## Blocked on a live DAW
 
 **Nothing.** Both DAWs were exercised live on 2026-08-10 and every question

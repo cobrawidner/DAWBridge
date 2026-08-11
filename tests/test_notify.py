@@ -96,7 +96,7 @@ def test_messages_say_what_happened_without_leaking_paths(tmp_path):
     assert "Pull from Bridge" in publish, "tell them what to do about it"
 
     load = notify.describe_load("conner", "protools", 12)
-    assert "r12" in load and "protools" in load
+    assert "r12" in load and "Pro Tools" in load, "written the way people write it"
 
     for message in (publish, load):
         assert ":\\" not in message and "/Users/" not in message, "no filesystem paths"
@@ -119,3 +119,46 @@ def test_mentions_are_disabled_in_the_payload(monkeypatch, tmp_path):
     notify._send("https://discord.com/api/webhooks/1/a", "@everyone hi")
 
     assert captured["body"]["allowed_mentions"] == {"parse": []}
+
+
+def test_project_name_comes_from_the_shared_folder(tmp_path):
+    # Session.name is useless for this - neither backend captures it, so
+    # every session reads 'Untitled'. The folder is what people named it.
+    folder = tmp_path / "Shady Grove" / "Shady Grove.dawbridge"
+    folder.mkdir(parents=True)
+    assert notify.project_name(folder) == "Shady Grove"
+
+
+def test_project_name_without_the_suffix(tmp_path):
+    folder = tmp_path / "Valley Bend"
+    folder.mkdir()
+    assert notify.project_name(folder) == "Valley Bend"
+
+
+def test_project_name_never_comes_back_empty(tmp_path):
+    # A trailing separator used to resolve to '' and produce "**** - ".
+    folder = tmp_path / "Song"
+    folder.mkdir()
+    assert notify.project_name(str(folder) + "\\") == "Song"
+
+
+def test_the_project_leads_the_message():
+    # Several projects can post to one channel; "published r36" with no
+    # project attached is unreadable there.
+    line = notify.describe_publish("Travis", "reaper", 36, tracks=7, clips=23,
+                                   project="Shady Grove")
+    assert line.startswith("**Shady Grove** - Travis published **r36** from Reaper")
+
+    load = notify.describe_load("Conner", "protools", 36, project="Shady Grove")
+    assert load.startswith("**Shady Grove** - Conner loaded **r36** into Pro Tools")
+
+
+def test_daw_names_are_written_the_way_people_write_them():
+    assert notify.daw_label("protools") == "Pro Tools"
+    assert notify.daw_label("reaper") == "Reaper"
+    assert notify.daw_label("something else") == "something else"
+
+
+def test_a_message_without_a_project_still_reads():
+    assert notify.describe_publish("Travis", "reaper", 36, tracks=1, clips=1).startswith(
+        "Travis published")

@@ -810,7 +810,8 @@ class DawBridgeGUI(ttk.Frame):
             who=short_name(self.name_var.get()), daw=daw, revision=session.revision,
             tracks=len(session.tracks),
             clips=sum(len(t.clips) for t in session.tracks),
-            warnings=len(pull_warnings)))
+            warnings=len(pull_warnings),
+            project=notify.project_name(folder)))
 
     def _do_load(self, folder: Path) -> None:
         """The "Pull from Bridge" button: the shared session lands in this DAW."""
@@ -856,7 +857,8 @@ class DawBridgeGUI(ttk.Frame):
             self.master.after(0, lambda w=w: self._log(f"[pull][warning] {w}"))
 
         self._notify(folder, "load", notify.describe_load(
-            who=short_name(self.name_var.get()), daw=daw, revision=session.revision))
+            who=short_name(self.name_var.get()), daw=daw, revision=session.revision,
+            project=notify.project_name(folder)))
 
     def _ask_confirm_on_main_thread(self, preview, daw: str) -> bool:
         """Ask for confirmation from a worker thread, safely.
