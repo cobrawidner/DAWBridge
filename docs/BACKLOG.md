@@ -4,22 +4,25 @@ The plan, written down so it doesn't live in one session's head. Anyone —
 a new session, a subagent, Travis from a phone — should be able to read
 this and know what's next and why.
 
-**Keep it current.** If you finish something, move it. If you learn
-something that changes the order, say so here rather than only in a
-report nobody re-reads.
+**Keeping this true is the main session's job.** Agents file proposals and
+update what they touch; the main session sees every landing, so it owns
+whether this file still matches reality. Update it *as part of* landing
+something, not when someone notices it has drifted - it has drifted twice
+already, both times because it was treated as a thing to tidy later.
 
 ---
 
 ## Who owns which files
 
-Three workers edit this repo concurrently. Collisions are the main way
+Four workers edit this repo concurrently. Collisions are the main way
 work gets lost, so ownership is explicit.
 
 | Owner | Files |
 |---|---|
-| **main session** | `store.py`, `cli.py`, `gui.py`, `docs/`, build + release |
+| **main session** | `store.py`, `cli.py`, `gui.py`, `checks.py`, `notify.py`, `docs/`, build + release |
 | **dawbridge-design** | `theme.py`, `assets/`, the identity artifact, `build_exe.py` icon wiring |
-| **dawbridge-collab** | `sync.py`, `model.py`, `backend.py`, both backends, `audiofile.py`, `syncstate.py`, `conflicts.py`, `tests/` |
+| **dawbridge-collab** (auditor) | `tests/` - finds bugs, files failing tests, investigates, proposes. Does not edit source. |
+| **dawbridge-build** (implementer) | `sync.py`, `model.py`, `backend.py`, both backends, `audiofile.py`, `syncstate.py`, `conflicts.py`. Does not edit tests. |
 
 Agents don't message each other. They report to the main session, which
 relays. If a change needs a file you don't own, **describe the shape you
@@ -40,26 +43,17 @@ preference, and preferences belong in conversation, not on a list.
 
 ### Blocking
 
-- **How does the collaborator receive the `.exe`?** And do they get
-  `docs/QUICKSTART.md` with it? Unanswered, and it is now the last thing
-  between this project and being used by two people.
-- **Does the collaborator know about the Discord channel?** The notify
-  config lives in the shared folder, so their copy starts posting as soon
-  as it reads it - without them having opted in on their machine. That is
-  the intended design, but it warrants a heads-up rather than a surprise.
-- **Split the audit agent in two?** Travis proposed: `dawbridge-collab`
-  finds bugs and files failing tests, a new implementer agent makes them
-  pass. Agreed in principle, deferred until the live E2E landed - which it
-  now has. The boundary would be `tests/` (auditor) versus source
-  (implementer). Awaiting the word.
-- **Audio-reference asymmetry** *(a decision, not a fix)*. Reaper
-  references audio directly in the Dropbox folder; Pro Tools copies into
-  its own session folder. So a Reaper project breaks if the folder moves
-  or goes offline, and Reaper writes peak files into the shared folder.
+*(All previously blocking questions were answered on 2026-08-11 and moved
+into Queued or Decided. Nothing is blocking right now.)*
+
 
 ### Proposed - awaiting triage
 
 Nothing here is agreed. Ordered by value-per-effort as I see it.
+
+*Landed since this list was written: **4** (selective publish) and **8**
+(extended-state identity). Distribution, the Discord heads-up, the agent
+split and the audio asymmetry were all answered - see Queued and Decided.*
 
 **1. A note attached to each publish.**
 *What.* A one-line message saved with the revision - "redid the second verse
@@ -91,7 +85,7 @@ whole overwrite problem.
 *Evidence.* `session.json` is 4KB; polling it is free next to the audio.
 *Effort.* Small.
 
-**4. Publish only the tracks you changed.** — **APPROVED 2026-08-10, in progress**
+**4. Publish only the tracks you changed.** — **LANDED 2026-08-11.**
 *What.* Scope a publish to selected tracks instead of replacing everything.
 *Why.* Every "you overwrote my work" failure traces to wholesale replace.
 This removes the class structurally rather than guarding against it.
@@ -243,11 +237,24 @@ False only when Reaper isn't running - that is not a setup problem.
 
 ## Queued work
 
-1. **Rename `Backend.pull` / `Backend.push`** *(dawbridge-collab, after live
-   E2E)*. They mean "read the DAW" and "write the DAW" and now invert against
-   the user-facing commands of the same name. Suggested: `read_from_daw` /
-   `write_to_daw`, or `capture` / `apply`. Four call sites in `cli.py` and
-   `gui.py` belong to the main session and get wired once the names are chosen.
+0. **Reaper should use local copies of the audio, not the Dropbox files.**
+   *Approved 2026-08-11.* Pro Tools already copies audio into its own
+   session folder; Reaper references the shared Dropbox path directly. So a
+   Reaper project breaks if the folder moves or goes offline, Reaper writes
+   peak files into the shared folder, and the DAW streams from a
+   cloud-synced directory during playback.
+
+   **The reason matters, because a wrong one invites the wrong fix.** Audio
+   read from Dropbox is not degraded - the bytes are identical. The real
+   problems are dropouts and latency reading from a synced folder,
+   cloud-only placeholder files the DAW expects to be local, Dropbox
+   re-syncing a file the DAW holds open, and peak files polluting the
+   shared store. Do not "fix" this by touching bit depth or format.
+
+   Copy to a local working folder on load, point takes there; import back
+   into the shared store on publish, where content-hash dedup already
+   handles the round trip. This makes Reaper behave like the backend that
+   already got it right.
 
 2. **No preview for the publish direction** *(main session)*. `preview` only
    describes what a pull would change in your DAW. Before publishing —
@@ -312,6 +319,18 @@ Recorded so nobody spends a session rediscovering the reasoning.
   but by the same mechanism, so it stays a warning.
 - **PTSL has no tempo, meter, marker or time-signature command** — re-verified
   against the installed protobufs: 276 commands, none of them.
+- **Distribution is GitHub Releases, built by CI.** `git tag v0.x.0 &&
+  git push origin v0.x.0` builds the exe on a Windows runner, runs the
+  suite, and attaches the binary and QUICKSTART to a Release. Nobody
+  copies a build into Dropbox by hand. The repo is private, so the
+  collaborator must be added as a GitHub collaborator to download it.
+- **Discord notification config is shared, not per-machine.** It lives in
+  `notify.json` in the shared folder, so both copies post to the channel
+  once one person sets it up. A notification only one of you receives is
+  worse than none. Travis confirmed the collaborator knows.
+- **`Backend.capture` / `Backend.apply`** are the backend contract. The
+  old `pull`/`push` names inverted against the user-facing commands and
+  are gone.
 - **The mark is `i2` in signal orange.** `.ico` and `dawbridge_mark.svg` are
   build outputs; regenerate with `python tools/build_exe.py --icon-only` after
   any colourway change — they don't update from a `theme.py` edit alone.
@@ -328,6 +347,6 @@ Recorded so nobody spends a session rediscovering the reasoning.
 - **Size work to survive being cut off.** Three agent runs have been killed
   mid-task by API session limits. Settle and record one question at a time
   rather than doing all the setup and leaving the answers to the end.
-- **The full suite runs with no DAW open** — 209 tests at time of writing. So
+- **The full suite runs with no DAW open** — 284 tests at time of writing. So
   most work here is possible from a cloud checkout; only live verification
   isn't.
