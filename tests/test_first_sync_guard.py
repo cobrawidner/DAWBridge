@@ -73,14 +73,26 @@ def test_first_ever_publish_onto_an_empty_folder_is_allowed(tmp_path, monkeypatc
     assert [t.name for t in store.load().tracks] == ["Audio 1"]
 
 
-def test_force_still_publishes_over_real_work(tmp_path, monkeypatch):
+def test_force_publishes_yours_without_deleting_theirs(tmp_path, monkeypatch):
+    """--force waives the *guard*, not the track scoping.
+
+    This asserted wholesale replacement until publish became selective.
+    The change is deliberate: --force means "publish even though someone
+    else has published since you last looked", not "delete tracks you
+    cannot account for". A never-synced machine has no baseline, so it
+    cannot tell a track you deleted from one that arrived while you were
+    away - and those have opposite correct answers. It keeps them.
+    """
     folder = tmp_path / "shared"
     store = _populated(folder)
     monkeypatch.setattr("dawbridge.cli._get_backend", lambda daw: _Backend())
     monkeypatch.setattr(syncstate, "_STATE_PATH", tmp_path / "state.json")
 
     assert main(["push", "--daw", "reaper", "--folder", str(folder), "--force"]) == 0
-    assert [t.name for t in store.load().tracks] == ["Audio 1"]
+
+    names = [t.name for t in store.load().tracks]
+    assert "Audio 1" in names, "your work is published"
+    assert len([n for n in names if n.startswith("Track ")]) == 6, "theirs survives"
 
 
 def test_publish_records_the_project_so_the_swap_guard_can_work(tmp_path, monkeypatch):

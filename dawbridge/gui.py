@@ -19,6 +19,7 @@ from . import checks, notify, syncstate, theme
 from .backend import Backend
 from .model import Session
 from .store import SharedSessionMoved, SharedStore
+from . import sync
 from .sync import preview_push
 
 _CONFIG_PATH = Path.home() / ".dawbridge_gui.json"
@@ -498,6 +499,32 @@ class DawBridgeGUI(ttk.Frame):
         ttk.Button(row, text="Close", command=win.destroy).pack(side="left", padx=(8, 0))
         entry.focus_set()
 
+    def _describe_plan(self, plan) -> list[str]:
+        """What this publish is about to do to the shared session."""
+        lines = [f"[push] publishing will: {plan.summary_line()}"]
+        for name in plan.removed:
+            lines.append(f"    REMOVE  {name} - you deleted it")
+        for name in plan.kept_theirs:
+            lines.append(f"    KEEP    {name} - your partner's, left untouched")
+        for name in plan.conflicts:
+            lines.append(f"[push][warning] you both changed {name!r}; "
+                         f"yours is being published over theirs")
+        for w in plan.warnings:
+            lines.append(f"[push][warning] {w}")
+        return lines
+
+    def _confirm_publish(self, plan, daw: str) -> bool:
+        body = [f"Publishing from {daw} will:", "", plan.summary_line(), ""]
+        if plan.removed:
+            body.append("Removing (you deleted these): " + ", ".join(plan.removed))
+        if plan.conflicts:
+            body.append("You BOTH changed, and yours will replace theirs: "
+                        + ", ".join(plan.conflicts))
+        body += ["", "The shared folder keeps the last 20 versions, so this is "
+                 "recoverable from History...", "", "Go ahead?"]
+        return self._ask_on_main_thread(
+            lambda: messagebox.askyesno("DAWBridge - confirm publish", "\n".join(body)))
+
     def _notify(self, folder: Path, event: str, message: str) -> None:
         """Tell Discord, if it's set up. Runs on the worker thread.
 
@@ -772,13 +799,38 @@ class DawBridgeGUI(ttk.Frame):
                 self.master.after(0, lambda: self._log("[push] cancelled - shared session untouched."))
                 return
 
-        before = len(session.tracks)
         loaded_revision = session.revision
+
+        # Both snapshots must be taken BEFORE capture(): it reuses
+        # canonical's Track objects and mutates them in place - that is how
+        # a track keeps its clip history - so a list taken afterwards is
+        # not a before-picture, and the comparison would conclude that
+        # nothing ever changed.
+        canonical_before = sync.snapshot_tracks(session)
+        seen = syncstate.last_synced(folder, daw)
+        baseline = sync.baseline_tracks_for(
+            store, session, seen.get("revision") if seen else None)
+
         # Things a pull notices but can't act on - tracks this publish
         # removes from the shared session, offline media, a sample rate
         # being redefined. Previously discovered and dropped in silence.
         pull_warnings: list[str] = []
         session = backend.capture(session, store, pull_warnings)
+
+        # A publish touches only the tracks you actually changed, so one
+        # your partner edited while you merely had it open survives.
+        plan = sync.plan_publish(canonical_before, session.tracks, baseline)
+        session.tracks = plan.tracks
+        for line in self._describe_plan(plan):
+            self.master.after(0, lambda line=line: self._log(line))
+
+        # Ask only when somebody's work is genuinely leaving or being
+        # replaced. Confirming an ordinary publish trains people to click
+        # through the dialog that matters.
+        if (plan.removed or plan.conflicts) and not self._confirm_publish(plan, daw):
+            self.master.after(0, lambda: self._log(
+                "[push] cancelled - the shared session is untouched."))
+            return
         # Reading a DAW takes seconds to minutes. Everything checked above
         # was checked before that read, so a partner publishing during it
         # would slip past every guard - this is the last chance to notice.
@@ -795,12 +847,11 @@ class DawBridgeGUI(ttk.Frame):
                 f"(Pull from Bridge), then publish again."))
             return
         syncstate.record_sync(folder, daw, session.revision, "publish", project)
-        added = len(session.tracks) - before
         self.master.after(
             0,
             lambda: self._log(
-                f"[push] published {daw} -> shared session: {added} new track(s) adopted, "
-                f"{len(session.tracks)} total. Revision {session.revision}."
+                f"[push] published {daw} -> shared session: {plan.summary_line()}. "
+                f"{len(session.tracks)} track(s) total, revision {session.revision}."
             ),
         )
         for w in pull_warnings:

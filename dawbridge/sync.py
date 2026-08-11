@@ -507,6 +507,215 @@ def renumber_tracks(tracks: list[Track]) -> None:
 
 
 @dataclass
+class PublishPlan:
+    """Which tracks a publish may touch, and what it did to each."""
+    tracks: list[Track] = field(default_factory=list)  # the new canonical track list
+    added: list[str] = field(default_factory=list)     # new here, not in the shared session
+    updated: list[str] = field(default_factory=list)   # you changed them; yours published
+    removed: list[str] = field(default_factory=list)   # you deleted them; taken out
+    kept_theirs: list[str] = field(default_factory=list)  # your partner's, left untouched
+    unchanged: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)  # both changed; yours won, loudly
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def touches_anything(self) -> bool:
+        return bool(self.added or self.updated or self.removed)
+
+    def summary_line(self) -> str:
+        """One line for a human deciding whether to publish.
+
+        Removals and preserved tracks are named explicitly because they are
+        the two things somebody needs to see BEFORE it happens: one takes
+        work out of the shared session, the other is the reassurance that
+        their partner's work is not being trampled.
+        """
+        if not self.touches_anything:
+            # Say it plainly. "3 unchanged" is a true statement that reads
+            # like something is about to happen.
+            return "no changes - the shared session already matches this project"
+
+        parts = []
+        if self.added:
+            parts.append(f"{len(self.added)} new track(s)")
+        if self.updated:
+            parts.append(f"{len(self.updated)} track(s) updated")
+        if self.removed:
+            parts.append(f"{len(self.removed)} track(s) removed ({', '.join(self.removed)})")
+        if self.kept_theirs:
+            parts.append(f"{len(self.kept_theirs)} of your partner's track(s) left alone")
+        if self.unchanged:
+            parts.append(f"{len(self.unchanged)} unchanged")
+        if self.conflicts:
+            parts.append(f"{len(self.conflicts)} also changed by your partner")
+        return ", ".join(parts) if parts else "no changes - the shared session already matches"
+
+
+def _clip_fingerprint(clip: Clip) -> tuple:
+    """A clip reduced to what a human would call a difference.
+
+    Positions are rounded to the existing move tolerance rather than
+    compared exactly: a round trip through the other DAW's rounding shifts
+    a value by a sample or two, and without this every publish would claim
+    to have changed every track.
+    """
+    step = _MOVE_TOLERANCE_SECONDS
+    return (
+        clip.id,
+        clip.name,
+        clip.audio_file,
+        round(clip.start_seconds / step),
+        round(clip.length_seconds / step),
+        round(clip.source_offset_seconds / step),
+        round(clip.fade_in_seconds / step),
+        round(clip.fade_out_seconds / step),
+        clip.loop_source,
+    )
+
+
+def _track_fingerprint(track: Track) -> tuple:
+    return (
+        track.name,
+        track.muted,
+        track.channels,
+        tuple(_clip_fingerprint(c) for c in track.clips),
+    )
+
+
+def tracks_equivalent(a: Track | None, b: Track | None) -> bool:
+    """Whether two versions of a track are the same arrangement."""
+    if a is None or b is None:
+        return a is b
+    return _track_fingerprint(a) == _track_fingerprint(b)
+
+
+def plan_publish(
+    canonical_tracks: list[Track],
+    live_tracks: list[Track],
+    baseline_tracks: list[Track] | None = None,
+) -> PublishPlan:
+    """Decide which tracks this publish is allowed to touch.
+
+    NOT a content merge. No clip, take or position is ever reconciled
+    between two versions; a track is taken whole from one side or the
+    other, and inside a track that is taken, wholesale replacement is
+    unchanged. What this removes is the failure where publishing a vocal
+    also republishes your older copy of a bass your partner just edited.
+
+    `baseline_tracks` is the canonical revision this machine last agreed
+    with - `syncstate` records the number and `archive/` holds the content.
+    It is what tells a track you DELETED apart from a track that ARRIVED
+    while you weren't looking: both are simply absent from your DAW.
+
+    Pass None when that revision can't be found (aged out of the archive,
+    or this machine has never synced). Then the two cases are genuinely
+    indistinguishable and have opposite correct answers, so nothing is
+    removed and the plan says why. Losing the ability to delete costs one
+    extra step; losing your partner's track does not undo.
+    """
+    plan = PublishPlan()
+    canonical_by_id = {t.id: t for t in canonical_tracks}
+    live_by_id = {t.id: t for t in live_tracks}
+    baseline_by_id = None if baseline_tracks is None else {t.id: t for t in baseline_tracks}
+
+    # This DAW's order leads; anything only the shared session has follows.
+    for track in live_tracks:
+        theirs = canonical_by_id.get(track.id)
+        if theirs is None:
+            plan.tracks.append(track)
+            plan.added.append(track.name)
+            continue
+
+        if tracks_equivalent(track, theirs):
+            plan.tracks.append(theirs)
+            plan.unchanged.append(track.name)
+            continue
+
+        was = None if baseline_by_id is None else baseline_by_id.get(track.id)
+        i_changed = was is None or not tracks_equivalent(track, was)
+        they_changed = was is not None and not tracks_equivalent(theirs, was)
+
+        if they_changed and not i_changed:
+            # You never touched it and they did. Publishing your copy would
+            # put their work back the way it was - the exact failure this
+            # is for.
+            plan.tracks.append(theirs)
+            plan.kept_theirs.append(theirs.name)
+            continue
+
+        plan.tracks.append(track)
+        plan.updated.append(track.name)
+        if they_changed and i_changed:
+            plan.conflicts.append(track.name)
+            plan.warnings.append(
+                f"you and your partner have both changed track {track.name!r} since you last "
+                f"synced. There is no merge - your version is being published over theirs. "
+                f"Their version is still in the shared session's history if you need it back"
+            )
+
+    # Tracks the shared session has and this DAW doesn't.
+    missing = [t for t in canonical_tracks if t.id not in live_by_id]
+    if baseline_by_id is None:
+        plan.tracks.extend(missing)
+        plan.kept_theirs.extend(t.name for t in missing)
+        if missing:
+            plan.warnings.append(
+                f"{len(missing)} track(s) in the shared session are not in this project and have "
+                f"been left alone, because this machine cannot tell whether you deleted them or "
+                f"they arrived while you were away - the revision it last saw has aged out of the "
+                f"archive, or it has never synced. To delete a track, load the shared session "
+                f"first, then delete and publish"
+            )
+    else:
+        for track in missing:
+            if track.id in baseline_by_id:
+                plan.removed.append(track.name)  # you had it, you deleted it
+            else:
+                plan.tracks.append(track)        # arrived after you last looked
+                plan.kept_theirs.append(track.name)
+
+    return plan
+
+
+def snapshot_tracks(session: Session) -> list[Track]:
+    """A detached copy of a session's tracks.
+
+    Needed because `capture()` reuses canonical's Track objects and mutates
+    them in place - that is how a track keeps its clip history across a
+    pull. So `list(session.tracks)` taken beforehand is not a
+    before-picture: every object in it changes underneath you, and a
+    comparison against it would report that nothing ever changed.
+    """
+    return Session.from_json(session.to_json()).tracks
+
+
+def baseline_tracks_for(store, canonical: Session, last_seen_revision: int | None) -> list[Track] | None:
+    """The tracks of the canonical revision this machine last agreed with,
+    or None when that can't be established.
+
+    `syncstate` records the number; the content is either canonical itself
+    (the common case - you published and nobody has since, so the revision
+    you last saw IS session.json, not an archive file) or one of the
+    archived revisions.
+
+    None means "don't guess": either this machine has never synced, or the
+    revision has aged out of the archive. plan_publish then refuses to
+    remove anything.
+    """
+    if last_seen_revision is None:
+        return None
+    if last_seen_revision == canonical.revision:
+        return snapshot_tracks(canonical)
+    try:
+        for revision, path in store.list_archive():
+            if revision == last_seen_revision:
+                return Session.load(path).tracks
+    except Exception:
+        return None
+    return None
+
+
+@dataclass
 class Identity:
     """Where one DAW object's bridge id came from, and what to write back.
 

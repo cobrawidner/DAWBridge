@@ -41,6 +41,7 @@ from . import checks, notify, syncstate
 from .backend import Backend
 from .model import Session, UnsupportedSchemaVersion
 from .store import SharedSessionMoved, SharedStore
+from . import sync
 from .sync import preview_push
 
 
@@ -172,13 +173,40 @@ def cmd_publish(args: argparse.Namespace) -> int:
               f"publish yours over theirs on purpose.", file=sys.stderr)
         return 1
 
-    before = len(session.tracks)
     loaded_revision = session.revision
+
+    # Both snapshots must be taken BEFORE capture(). capture() reuses
+    # canonical's Track objects and mutates them in place - that is how a
+    # track keeps its clip history - so a list taken afterwards is not a
+    # before-picture and the comparison would conclude nothing ever
+    # changed. See sync.snapshot_tracks.
+    canonical_before = sync.snapshot_tracks(session)
+    seen = syncstate.last_synced(Path(args.folder), args.daw)
+    baseline = sync.baseline_tracks_for(
+        store, session, seen.get("revision") if seen else None)
+
     # A pull notices things it cannot act on - tracks this publish removes,
     # offline media, a sample rate being redefined. Those used to be
     # discovered and dropped on the floor at the point of discovery.
     pull_warnings: list[str] = []
     session = backend.capture(session, store, pull_warnings)
+
+    # A publish no longer replaces the whole track list. It touches only
+    # the tracks you actually changed, so a track your partner edited
+    # while you merely had it open survives.
+    plan = sync.plan_publish(canonical_before, session.tracks, baseline)
+    session.tracks = plan.tracks
+    print(f"[dawbridge] publishing will: {plan.summary_line()}")
+    for name in plan.removed:
+        print(f"    REMOVE  {name} - you deleted it")
+    for name in plan.kept_theirs:
+        print(f"    KEEP    {name} - your partner's, left untouched")
+    for name in plan.conflicts:
+        print(f"[dawbridge][warning] you both changed {name!r}; yours is being published "
+              f"over theirs")
+    for w in plan.warnings:
+        print(f"[dawbridge][warning] {w}")
+
     try:
         # --force means "publish over theirs on purpose", so it also waives
         # the check for anything that landed while we were reading.
@@ -191,12 +219,11 @@ def cmd_publish(args: argparse.Namespace) -> int:
         print(f"[dawbridge] load their work first (dawbridge pull --daw {args.daw} "
               f"--folder ...), or re-run with --force to publish over it.", file=sys.stderr)
         return 1
-    added = len(session.tracks) - before
     syncstate.record_sync(Path(args.folder), args.daw, session.revision, "publish", project)
     if drift and args.force:
         print(f"[dawbridge] --force: published over a newer shared session ({drift})")
-    print(f"[dawbridge] published {args.daw} -> shared session: {added} new track(s) adopted, "
-          f"{len(session.tracks)} total. Shared session now at revision {session.revision}.")
+    print(f"[dawbridge] published {args.daw} -> shared session: {plan.summary_line()}. "
+          f"{len(session.tracks)} track(s) total, now at revision {session.revision}.")
     for w in pull_warnings:
         print(f"[dawbridge][warning] {w}")
 

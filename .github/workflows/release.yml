@@ -1,0 +1,62 @@
+# Build DAWBridge.exe on GitHub and attach it to a Release.
+#
+# Why this exists: the alternative is Travis building locally and copying
+# the .exe into Dropbox by hand every time, which means the collaborator's
+# copy is only as current as the last time someone remembered. Here, a tag
+# produces a download link that is always the real build of that tag.
+#
+# To cut a release:
+#     git tag v0.2.0 && git push origin v0.2.0
+#
+# The runner must be Windows: PyInstaller builds for the platform it runs
+# on, and this ships as a Windows .exe.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:        # so a build can be triggered without tagging
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write       # needed to create the Release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"   # matches the local build
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pillow
+          pip install -e .
+
+      - name: Run the tests
+        # A build nobody can trust is worse than no build. The suite runs
+        # without a DAW open, which is exactly why it can run here.
+        run: python -m pytest -q
+
+      - name: Build the exe
+        run: python tools/build_exe.py
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/DAWBridge.exe
+            docs/QUICKSTART.md
+          body: |
+            Download **DAWBridge.exe** below and run it. No installation.
+
+            **First time?** Read QUICKSTART.md - it covers the one idea and
+            the two buttons, and what to do when DAWBridge warns you about
+            something.
+
+            Built from this tag by GitHub Actions, with the full test suite
+            green.
+          generate_release_notes: true
