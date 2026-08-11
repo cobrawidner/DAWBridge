@@ -30,28 +30,29 @@ tried and failed the once it wasn't.
 
 ## Blocked on Travis
 
-- **Push to GitHub.** Remote is configured (`cobrawidner/DAWBridge`, private,
-  verified). The stored PAT is expired, so it needs a browser sign-in from the
-  machine: `git push -u origin main`, and if no browser appears,
-  `cmdkey /delete:LegacyGeneric:target=git:https://github.com` first. Until
-  this lands, phone-based work is impossible.
 - **How does the collaborator receive the `.exe`?** And do they get
-  `docs/QUICKSTART.md` with it? Unanswered.
+  `docs/QUICKSTART.md` with it? Unanswered, and it is now the last thing
+  between this project and being used by two people.
+- **Does the collaborator know about the Discord channel?** The notify
+  config lives in the shared folder, so their copy starts posting as soon
+  as it reads it - without them having opted in on their machine. That is
+  the intended design, but it warrants a heads-up rather than a surprise.
+- **Split the audit agent in two?** Travis proposed: `dawbridge-collab`
+  finds bugs and files failing tests, a new implementer agent makes them
+  pass. Agreed in principle, deferred until the live E2E landed - which it
+  now has. The boundary would be `tests/` (auditor) versus source
+  (implementer). Awaiting the word.
+- **Audio-reference asymmetry** *(a decision, not a fix)*. Reaper
+  references audio directly in the Dropbox folder; Pro Tools copies into
+  its own session folder. So a Reaper project breaks if the folder moves
+  or goes offline, and Reaper writes peak files into the shared folder.
 
 ## Blocked on a live DAW
 
-The Pro Tools half was settled by live test on 2026-08-10. What remains is
-all Reaper, and all of it is blocked on **one dialog dismissal**: Reaper put
-up a "New Version Notification" modal, which holds its main thread, so the
-web interface on port 2307 stops serving and reapy cannot attach. One click
-on *Close* unblocks every item below. The probe script is written and waiting
-at `scratchpad/probe_reaper.py`.
-
-- **Reaper `EnumProjectMarkers2` tuple layout** — both handled blind by
-  `_decode_marker_row`; safe, but which one this install returns is unknown.
-- **Fade read-back** on the Reaper side.
-- **Reaper tempo-map write** for time signature — still refused, since it
-  edits the tempo map and needs a live Reaper to validate against.
+**Nothing.** Both DAWs were exercised live on 2026-08-10 and every question
+on this list was answered. What remains unproven is narrower and recorded in
+the Reaper module docstring: the **clip** push/pull path has never been run
+end to end against a real Reaper.
 
 Note: reapy is already configured on this machine (`csurf_0=HTTP 0 2307`,
 server script registered in `reaper-kb.ini`). `dist_api_is_enabled()` returns
@@ -79,10 +80,9 @@ False only when Reaper isn't running - that is not a setup problem.
    captured and never applied anywhere. Fades aren't read on the Pro Tools
    side. See the field-fidelity table in the audit reports.
 
-5. **Audio-reference asymmetry.** Reaper references audio directly in the
-   Dropbox folder; Pro Tools copies into its own session folder. So a Reaper
-   project breaks if the folder moves, and Reaper writes peak files into the
-   shared folder. Needs a decision, not a fix.
+5. **The `.exe` has no way to check for a newer version.** Two people on
+   different builds is ordinary; the format guard tells the older one to
+   update, but nothing tells them how.
 
 ---
 
@@ -118,6 +118,12 @@ Recorded so nobody spends a session rediscovering the reasoning.
   Min:Secs); writes accept several formats and resolve them correctly. The
   earlier format-learning fallback was built on a wrong assumption and is
   gone.
+- **Reaper's tempo write drags the whole arrangement.** `SetCurrentBPM`
+  scales every beat-attached item, length, fade and marker by the tempo
+  ratio - measured, 5.3333s/0.3333s became 4.0000s/0.2500s on 90->120.
+  Canonical is in seconds, so the tempo is written only into a project
+  with no items. `SetTempoTimeSigMarker` *can* write the time signature,
+  but by the same mechanism, so it stays a warning.
 - **PTSL has no tempo, meter, marker or time-signature command** — re-verified
   against the installed protobufs: 276 commands, none of them.
 - **The mark is `i2` in signal orange.** `.ico` and `dawbridge_mark.svg` are
