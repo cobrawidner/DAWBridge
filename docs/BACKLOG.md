@@ -217,7 +217,20 @@ sides would behave differently, which is its own cost.
 
 ## Blocked on a live DAW
 
-**Nothing.** Both DAWs were exercised live on 2026-08-10 and every question
+**Proposal 11 (session start time), attempted and not settled.** Pro Tools
+launches into its Dashboard when no session is open, and that modal blocks
+PTSL - `create_session` never returns. Dismissing it is a click, and the
+Dashboard's default Local Storage points at
+`Dropbox\Conners (1)\ProTools Working Folder\`, so a misclick creates a
+session in a real working folder. Left alone.
+*Recipe for next time:* have someone dismiss the Dashboard first, or open an
+existing session, THEN run
+`scratchpad/probe_starttime.py` - it sets the start to 01:00:00:00, spots a
+clip at 10.0s and prints the export's sample column against the three
+reference numbers (1 hour = 172,800,000 samples at 48kHz). The zero-start
+case is already known good: a clip spotted at 4.0s read back as 4.0s.
+
+Otherwise both DAWs were exercised live on 2026-08-10 and every other question
 on this list was answered. What remains unproven is narrower and recorded in
 the Reaper module docstring: the **clip** push/pull path has never been run
 end to end against a real Reaper.

@@ -144,28 +144,6 @@ class Backend(ABC):
         """
 
 
-    # ---- deprecated names, kept only until the callers move ------------
-    #
-    # The methods were named for the direction the DATA moves relative to
-    # the DAW, which is the opposite of the direction the user-facing
-    # commands are named for, so `pull` here meant `push` there and vice
-    # versa. `capture` and `apply` say which way the data goes without
-    # anyone having to pick a reference point - and they're the words this
-    # codebase's own prose already used ("every pull captures the live
-    # mute state; every push applies it").
-    #
-    # These two forward so cli.py and gui.py keep working while their call
-    # sites move; delete them once they have.
-
-    def pull(self, session: Session, store, warnings: Optional[list[str]] = None) -> Session:
-        """Deprecated alias for capture()."""
-        return self.capture(session, store, warnings)
-
-    def push(self, session: Session, store) -> list[str]:
-        """Deprecated alias for apply()."""
-        return self.apply(session, store)
-
-
 class MockBackend(Backend):
     """In-memory stand-in used by tests and for exercising the CLI/sync
     logic without a real DAW attached.

@@ -27,10 +27,10 @@ def test_pull_accepts_a_warnings_list_and_works_without_one():
     backend = MockBackend()
     backend.tracks["aaaaaaaa"] = {"name": "Kick", "clip_ids": set()}
 
-    assert backend.pull(Session(), None) is not None, "must stay callable with no list"
+    assert backend.capture(Session(), None) is not None, "must stay callable with no list"
 
     warnings: list[str] = []
-    backend.pull(Session(), None, warnings)
+    backend.capture(Session(), None, warnings)
     assert isinstance(warnings, list)
 
 
@@ -61,18 +61,6 @@ def test_read_live_markers_takes_warnings_on_every_backend():
         assert all(params[n].kind is inspect.Parameter.KEYWORD_ONLY for n in extra), (
             f"{cls.__name__}: extra params must be keyword-only so the call stays uniform"
         )
-
-
-def test_the_old_names_still_forward_until_the_callers_move():
-    # cli.py and gui.py still say pull/push; they must keep working, and
-    # they must reach the same code.
-    backend = MockBackend()
-    backend.tracks["aaaaaaaa"] = {"name": "Kick", "clip_ids": set()}
-
-    session = backend.pull(Session(), None)
-
-    assert [t.name for t in session.tracks] == ["Kick"]
-    assert backend.push(session, None) == backend.apply(session, None)
 
 
 # ---- tracks silently disappearing from the shared session -------------
