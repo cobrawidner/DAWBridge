@@ -95,33 +95,29 @@ def test_both_events_are_on_by_default(tmp_path):
     assert notify.is_enabled_for(root, "load")
 
 
-def test_a_fresh_machine_posts_nothing_even_though_the_folder_is_configured(tmp_path):
-    """The whole point of separating consent from the URL.
+def test_a_second_machine_posts_without_being_configured(tmp_path):
+    """Travis's call: handing the URL to DAWBridge is the consent.
 
-    The webhook lives in the shared folder so one person sets the channel
-    up once. But picking that folder must not enrol you in posting to
-    someone else's Discord without you ever agreeing - which is what
-    happened before this split.
+    So the collaborator sets nothing up - their copy finds the webhook in
+    the shared folder and posts. A channel only one of you reaches is
+    worse than none.
     """
     root = _configure(tmp_path, opted_in=False,
                       discord_webhook="https://discord.com/api/webhooks/1/a")
 
-    assert notify.webhook_url(root), "the URL is there to be found"
-    assert notify.machine_opted_in(root) is False
-    assert notify.is_enabled_for(root, "publish") is False
-    assert notify.is_enabled_for(root, "load") is False
+    assert notify.is_enabled_for(root, "publish") is True
+    assert notify.is_enabled_for(root, "load") is True
 
 
-def test_opting_in_turns_it_on_without_touching_the_shared_folder(tmp_path):
-    root = _configure(tmp_path, opted_in=False,
-                      discord_webhook="https://discord.com/api/webhooks/1/a")
+def test_muting_this_machine_leaves_the_shared_folder_alone(tmp_path):
+    root = _configure(tmp_path, discord_webhook="https://discord.com/api/webhooks/1/a")
     before = (root / notify.CONFIG_NAME).read_text(encoding="utf-8")
 
-    notify.set_machine_opt_in(root, True)
+    notify.set_machine_opt_in(root, False)
 
-    assert notify.is_enabled_for(root, "publish") is True
+    assert notify.is_enabled_for(root, "publish") is False, "an explicit mute sticks"
     assert (root / notify.CONFIG_NAME).read_text(encoding="utf-8") == before, (
-        "consent is this machine's business - the shared folder is unchanged"
+        "muting yourself must not dismantle the channel for your partner"
     )
 
 

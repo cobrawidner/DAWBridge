@@ -469,11 +469,10 @@ class DawBridgeGUI(ttk.Frame):
         if not notify.webhook_url(folder):
             say("Not set up yet.")
         elif notify.machine_opted_in(folder):
-            say("On. This machine posts to the channel.", theme.READOUT_GOOD)
+            say("On. Both machines post to this channel.", theme.READOUT_GOOD)
         else:
-            say("A channel is set up for this folder, but this machine has not "
-                "agreed to post to it. Press Save to turn it on here.",
-                theme.READOUT_WARN)
+            say("A channel is set up for this folder, but this machine is muted. "
+                "Press Save to unmute it.", theme.READOUT_WARN)
 
         def save(and_test: bool = False) -> None:
             url = url_var.get().strip()
@@ -512,9 +511,9 @@ class DawBridgeGUI(ttk.Frame):
             except Exception as exc:  # noqa: BLE001
                 say(f"Could not turn off: {exc}", theme.READOUT_CRIT)
                 return
-            say("This machine will no longer post. The channel is still set up "
-                "for whoever else uses this folder.", theme.READOUT_INK)
-            self._log("[notify] this machine opted out of notifications.")
+            say("Muted. The channel is still set up, and your collaborator's "
+                "copy still posts to it.", theme.READOUT_INK)
+            self._log("[notify] this machine muted; the channel is untouched.")
 
         row = ttk.Frame(body, style="Chassis.TFrame")
         row.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 0))
@@ -522,7 +521,7 @@ class DawBridgeGUI(ttk.Frame):
         ttk.Button(row, text="Save and send test",
                    command=lambda: save(and_test=True)).pack(side="left", padx=(8, 0))
         theme.separator(row, orient="vertical").pack(side="left", fill="y", padx=14)
-        ttk.Button(row, text="Turn off here", command=turn_off).pack(side="left")
+        ttk.Button(row, text="Mute this machine", command=turn_off).pack(side="left")
         ttk.Button(row, text="Close", command=win.destroy).pack(side="left", padx=(8, 0))
         entry.focus_set()
 

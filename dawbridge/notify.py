@@ -32,11 +32,11 @@ from urllib.parse import urlparse
 
 CONFIG_NAME = "notify.json"
 
-# Consent lives here, on the machine, and never in the shared folder.
-# The URL is shared so one person sets the channel up once; agreeing to
-# post to it is a separate decision each person makes for themselves.
-# Without this split, picking the shared folder silently enrolled you in
-# posting to somebody else's Discord.
+# Per-machine mute switch. Absent means posting - handing the webhook URL
+# to DAWBridge is itself the consent, which is Travis's call and the
+# reason there is no extra step for the second person. This file exists
+# only so an individual can silence their own copy without deleting the
+# channel everyone else is using.
 _OPT_IN_PATH = Path.home() / ".dawbridge_notify.json"
 
 # Discord's own hosts, and nothing else. See rule 3 above.
@@ -97,12 +97,13 @@ def _opt_in_key(root: Path) -> str:
 
 
 def machine_opted_in(root: Path) -> bool:
-    """Has *this machine* agreed to post to this folder's channel?
+    """Does this machine post to this folder's channel?
 
-    Absent means no. A first launch posts nothing, whatever the shared
-    folder already contains.
+    Absent means yes: a webhook in the shared folder is taken as consent,
+    so nobody has to configure anything twice. Only an explicit opt-out
+    is remembered.
     """
-    return bool(_opt_ins().get(_opt_in_key(root), False))
+    return bool(_opt_ins().get(_opt_in_key(root), True))
 
 
 def set_machine_opt_in(root: Path, on: bool) -> None:
@@ -126,7 +127,7 @@ def is_enabled_for(root: Path, event: str) -> bool:
     if not str(config.get("discord_webhook", "")).strip():
         return False
     if not machine_opted_in(root):
-        return False
+        return False  # this machine was explicitly muted
     events = config.get("events")
     if events is None:
         return True

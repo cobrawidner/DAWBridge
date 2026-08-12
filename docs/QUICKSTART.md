@@ -178,17 +178,16 @@ Same thing from the command line, if you have the developer setup:
 python -m dawbridge.cli notify --folder "<the shared folder>" --webhook "<the url>" --test
 ```
 
-The URL lives in the shared folder, so it only gets set up once. But **each
-machine has to agree to post separately** — opening a shared folder someone
-else configured will never sign you up to a channel you didn't choose. Your
-copy stays silent until you open **Notifications…** and press Save.
+Set it up once and **both** of you post — the URL lives in the shared folder,
+so your collaborator's copy finds it and needs no setup. A channel only one of
+you reaches is worse than none.
 
 Messages say who, which DAW, the revision and how many tracks and clips. They
 never include file paths, audio, or anything from inside your session. If
 Discord is unreachable the sync still completes normally and the app says so
 in the log.
 
-**Turn off here** stops your machine posting and leaves the channel set up for everyone else. To post only on publishes, use the same window.
+**Mute this machine** stops your copy posting while leaving the channel working for everyone else. To post only on publishes, use the same window.
 
 ---
 

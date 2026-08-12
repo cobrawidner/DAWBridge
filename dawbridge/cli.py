@@ -443,8 +443,8 @@ def cmd_notify(args: argparse.Namespace) -> int:
         # other person - those are different intentions and the second
         # one is rarely what somebody means.
         notify.set_machine_opt_in(root, False)
-        print("[notify] this machine will no longer post. The channel is still "
-              "set up for whoever else uses this folder.")
+        print("[notify] this machine is muted. The channel is still set up, and "
+              "whoever else uses this folder still posts to it.")
         return 0
 
     if args.on:
@@ -476,9 +476,8 @@ def cmd_notify(args: argparse.Namespace) -> int:
         return 0
 
     if not notify.machine_opted_in(root):
-        print("[notify] a channel is set up for this folder, but THIS machine has "
-              "not agreed to post to it.")
-        print(f"[notify] turn it on with: dawbridge notify --folder {args.folder} --on")
+        print("[notify] a channel is set up for this folder, but THIS machine is muted.")
+        print(f"[notify] unmute with: dawbridge notify --folder {args.folder} --on")
         return 0
 
     events = [e for e in ("publish", "load") if notify.is_enabled_for(root, e)]
