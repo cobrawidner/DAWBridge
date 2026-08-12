@@ -365,6 +365,9 @@ Recorded so nobody spends a session rediscovering the reasoning.
   shape will hit the same thing.
 - **PTSL has no tempo, meter, marker or time-signature command** — re-verified
   against the installed protobufs: 276 commands, none of them.
+- **The Discord config belongs in the shared folder, not per-machine.**
+  It ties the channel to the project. A machine can mute itself, and
+  that mute is the only thing recorded locally.
 - **Distribution is GitHub Releases, built by CI.** `git tag v0.x.0 &&
   git push origin v0.x.0` builds the exe on a Windows runner, runs the
   suite, and attaches the binary and QUICKSTART to a Release. Nobody
