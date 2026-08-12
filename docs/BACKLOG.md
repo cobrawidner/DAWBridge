@@ -236,34 +236,20 @@ state was redirected to a scratch file and confirmed untouched afterwards.
   absent from the DAW, was removed - so preserving by default did not
   quietly break deleting.
 
-Not exercised live: the same paths in **Pro Tools**, and the
-`unavailable_reason` "running but refused" branch.
+**Pro Tools, same day, session `DAWBridge E2E` at 44.1kHz:**
 
-## Blocked on a live DAW
+- `unavailable_reason()` returns `None` against a running Pro Tools, and
+  the closed-DAW sentence was confirmed earlier - both live.
+- `capture()` read a tagged track and its clip correctly, and the new
+  warning channel fired usefully: the sample-rate change from 48000 to
+  44100 was reported rather than silently accepted.
+- **Selective publish preserves the partner's work from the Pro Tools
+  side too** - a track added to canonical after the baseline survived,
+  and an unchanged project correctly reported "no changes".
 
-**Proposal 11 (session start time), attempted and not settled.** Pro Tools
-launches into its Dashboard when no session is open, and that modal blocks
-PTSL - `create_session` never returns. Dismissing it is a click, and the
-Dashboard's default Local Storage points at
-`Dropbox\Conners (1)\ProTools Working Folder\`, so a misclick creates a
-session in a real working folder. Left alone.
-*Recipe for next time:* have someone dismiss the Dashboard first, or open an
-existing session, THEN run
-`scratchpad/probe_starttime.py` - it sets the start to 01:00:00:00, spots a
-clip at 10.0s and prints the export's sample column against the three
-reference numbers (1 hour = 172,800,000 samples at 48kHz). The zero-start
-case is already known good: a clip spotted at 4.0s read back as 4.0s.
-
-Otherwise both DAWs were exercised live on 2026-08-10 and every other question
-on this list was answered. What remains unproven is narrower and recorded in
-the Reaper module docstring: the **clip** push/pull path has never been run
-end to end against a real Reaper.
-
-Note: reapy is already configured on this machine (`csurf_0=HTTP 0 2307`,
-server script registered in `reaper-kb.ini`). `dist_api_is_enabled()` returns
-False only when Reaper isn't running - that is not a setup problem.
-
----
+Not exercised live: the `unavailable_reason` "running but refused"
+branch, which needs a Pro Tools that accepts a connection and then
+rejects the command.
 
 ## Queued work
 
@@ -347,6 +333,13 @@ Recorded so nobody spends a session rediscovering the reasoning.
   Canonical is in seconds, so the tempo is written only into a project
   with no items. `SetTempoTimeSigMarker` *can* write the time signature,
   but by the same mechanism, so it stays a warning.
+- **A Pro Tools session start time does not offset anything.** Settled
+  live 2026-08-11: a clip spotted at 10.0s read back as 10.0s with the
+  session starting at `00:00:00:00`, and *still* 10.0s after the start
+  was moved to `01:00:00:00`. The text export's sample columns and
+  `SpotClipsByID` are both relative to session start, consistently. This
+  was proposal 11, and the feared 3600-second silent offset does not
+  exist.
 - **PTSL has no tempo, meter, marker or time-signature command** — re-verified
   against the installed protobufs: 276 commands, none of them.
 - **Distribution is GitHub Releases, built by CI.** `git tag v0.x.0 &&
