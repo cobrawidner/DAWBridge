@@ -223,11 +223,11 @@ def cmd_publish(args: argparse.Namespace) -> int:
     for name in plan.removed:
         print(f"    REMOVE  {name} - you deleted it")
     for name in plan.kept_theirs:
-        print(f"    KEEP    {name} - your partner's, left untouched")
+        print(f"    KEEP    {name} - someone else's, left untouched")
     for name in plan.recoloured:
         print(f"    COLOUR  {name} - recoloured")
     for name in plan.conflicts:
-        print(f"[dawbridge][warning] you both changed {name!r}; yours is being published "
+        print(f"[dawbridge][warning] you and someone else both changed {name!r}; yours is being published "
               f"over theirs")
     for w in plan.warnings:
         print(f"[dawbridge][warning] {w}")

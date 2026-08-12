@@ -215,7 +215,7 @@ class DawBridgeGUI(ttk.Frame):
         name_row = ttk.Frame(body, style="Chassis.TFrame")
         name_row.grid(row=2, column=1, columnspan=2, sticky="w", pady=6)
         ttk.Entry(name_row, textvariable=self.name_var, width=26).pack(side="left")
-        tk.Label(name_row, text="shown to your collaborator", background=theme.CHASSIS,
+        tk.Label(name_row, text="shown to everyone on this project", background=theme.CHASSIS,
                  foreground=theme.INK_3, font=theme.FONTS["button"]).pack(
             side="left", padx=(12, 0))
 
@@ -432,7 +432,7 @@ class DawBridgeGUI(ttk.Frame):
         body.columnconfigure(1, weight=1)
 
         ttk.Label(body, wraplength=520, justify="left", text=(
-            "Post a message to a Discord channel whenever either of you publishes "
+            "Post a message to a Discord channel whenever anyone publishes "
             "or loads, so nobody has to remember to say so.\n\n"
             "In Discord: Server Settings > Integrations > Webhooks > New Webhook. "
             "Pick a channel, copy the URL, paste it here."
@@ -466,7 +466,7 @@ class DawBridgeGUI(ttk.Frame):
         def say(text: str, colour: str = theme.READOUT_INK) -> None:
             status.configure(text=text, foreground=colour)
 
-        say("On. Both of you post to this channel." if notify.webhook_url(folder)
+        say("On. Everyone on this project posts here." if notify.webhook_url(folder)
             else "Not set up yet.",
             theme.READOUT_GOOD if notify.webhook_url(folder) else theme.READOUT_INK)
 
@@ -508,7 +508,7 @@ class DawBridgeGUI(ttk.Frame):
             if not messagebox.askyesno(
                 "DAWBridge - turn off notifications",
                 "Turn notifications off for this project?\n\n"
-                "The webhook is shared, so neither of you will get messages "
+                "The webhook is shared, so nobody on this project will get messages "
                 "until it's set up again.",
                 parent=win,
             ):
@@ -538,11 +538,11 @@ class DawBridgeGUI(ttk.Frame):
         for name in plan.removed:
             lines.append(f"    REMOVE  {name} - you deleted it")
         for name in plan.kept_theirs:
-            lines.append(f"    KEEP    {name} - your partner's, left untouched")
+            lines.append(f"    KEEP    {name} - someone else's, left untouched")
         for name in plan.recoloured:
             lines.append(f"    COLOUR  {name} - recoloured")
         for name in plan.conflicts:
-            lines.append(f"[push][warning] you both changed {name!r}; "
+            lines.append(f"[push][warning] you and someone else both changed {name!r}; "
                          f"yours is being published over theirs")
         for w in plan.warnings:
             lines.append(f"[push][warning] {w}")
@@ -553,7 +553,7 @@ class DawBridgeGUI(ttk.Frame):
         if plan.removed:
             body.append("Removing (you deleted these): " + ", ".join(plan.removed))
         if plan.conflicts:
-            body.append("You BOTH changed, and yours will replace theirs: "
+            body.append("Someone else also changed these, and yours will replace theirs: "
                         + ", ".join(plan.conflicts))
         body += ["", "The shared folder keeps the last 20 versions, so this is "
                  "recoverable from History...", "", "Go ahead?"]
@@ -653,7 +653,7 @@ class DawBridgeGUI(ttk.Frame):
             win, wraplength=520, justify="left",
             text=(f"The shared session is at r{current.revision}. Restoring publishes an "
                   f"older version as a new revision - it does not rewind, so your "
-                  f"collaborator sees the change, and what it replaces is archived too."),
+                  f"everyone else sees the change, and what it replaces is archived too."),
         )
         note.pack(anchor="w", padx=14, pady=(10, 0))
 

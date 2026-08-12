@@ -388,6 +388,13 @@ Recorded so nobody spends a session rediscovering the reasoning.
 
 ## Working notes
 
+- **There can be more than two people.** Everyone with access to the
+  shared folder can publish, so "your partner" is the wrong mental model
+  and the wrong wording. Three consequences that are not just verbiage:
+  the 20-revision archive fills roughly N times faster; simultaneous
+  publishes (and so Dropbox conflicted copies) get likelier with every
+  extra person; and `updated_by` records who published *last*, not who
+  changed a given track - inferable with two people, guesswork with four.
 - **The damage in this codebase is quiet.** Almost every bug found has been an
   operation that appeared to succeed: audio arriving mono while still
   reporting stereo, positions quantising and drifting, a rename dropped

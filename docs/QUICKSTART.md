@@ -1,8 +1,8 @@
 # DAWBridge — getting started
 
-DAWBridge lets two people work on the same song in **different DAWs**. One of
-you is in Reaper, the other in Pro Tools, and a shared Dropbox folder passes
-the arrangement back and forth.
+DAWBridge lets several people work on the same song in **different DAWs**.
+Some of you are in Reaper, some in Pro Tools, and a shared Dropbox folder
+passes the arrangement back and forth.
 
 You don't need to understand anything technical to use it. You do need to
 understand one idea and two buttons.
@@ -13,12 +13,12 @@ understand one idea and two buttons.
 
 **The shared folder is the master copy.**
 
-Think of it as a whiteboard both of you can see. You copy the whiteboard into
+Think of it as a whiteboard everyone can see. You copy the whiteboard into
 your DAW, do your work, then copy your version back onto the whiteboard. The
 last person to write on it wins — there is no clever merging.
 
 That's why the order matters: **load first, work second, publish third.** If
-you publish without loading first, you write over whatever your collaborator
+you publish without loading first, you write over whatever your collaborators
 put there.
 
 ---
@@ -30,13 +30,13 @@ out to it — the same way those words work in any other tool.
 
 | Button | What it does |
 |---|---|
-| **Pull from Bridge** | Brings the shared version **into your DAW**. This is how you get your collaborator's work. Do this first, every time. |
+| **Pull from Bridge** | Brings the shared version **into your DAW**. This is how you get your collaborators's work. Do this first, every time. |
 | **Push to Bridge** | Sends what's in **your DAW** out to the shared folder. This is how you publish. Do this when you're done. |
 | **Preview pull** | Shows exactly what "Pull from Bridge" would change, and changes nothing. Free to click. |
 | **Refresh status** | Re-reads the shared folder and shows what's there right now. |
 | **Check folder** | Looks for problems — missing audio, conflicted copies, overlapping clips. Changes nothing. |
 | **History...** | The last 20 versions of the shared session, and a way to put one back. |
-| **Notifications...** | Set up a Discord channel that gets told whenever either of you publishes or loads. |
+| **Notifications...** | Set up a Discord channel that gets told whenever anyone publishes or loads. |
 
 If you remember nothing else: **pull to get theirs, push to send yours.**
 
@@ -67,7 +67,7 @@ It remembers all three next time.
 
 1. **Preview pull**, if you want to see what's waiting before you take it.
    This changes nothing.
-2. **Pull from Bridge** — brings in whatever your collaborator published.
+2. **Pull from Bridge** — brings in whatever your collaborators publish.
 3. Read the log. It tells you what changed.
 4. **Work in your DAW as normal.** DAWBridge isn't running anything while you
    work.
@@ -80,8 +80,8 @@ There's no preview of a publish — the preview only shows what a *pull* would
 change in your DAW. Before publishing, the thing to check is that you pulled
 first.
 
-Tell your collaborator when you've published. DAWBridge will *catch* the case
-where you both publish at once, but a message is faster than a warning — and
+Tell everyone when you've published. DAWBridge will *catch* the case
+where two of you publish at once, but a message is faster than a warning — and
 if a Discord channel is set up (below), that message sends itself.
 
 ---
@@ -92,7 +92,7 @@ DAWBridge interrupts rather than guessing. Every one of these means real work
 is at risk.
 
 **"someone else has published since your last sync"**
-Your collaborator published while you were working. If you continue, your
+Your collaborators publish while you were working. If you continue, your
 version replaces theirs and theirs is gone from the shared folder. What you
 almost always want instead: cancel, click **Pull from Bridge** to load their
 work, check your own changes are still there, then publish.
@@ -103,7 +103,7 @@ shared session with *this* song's contents. If you meant to switch songs, fine
 — otherwise open the right project first.
 
 **"the shared session moved while your DAW was being read"**
-Your collaborator published in the few seconds it took to read your DAW.
+Your collaborators publish in the few seconds it took to read your DAW.
 Nothing was written. Load theirs, then publish again.
 
 **"clips reference audio missing from the shared folder"**
@@ -111,7 +111,7 @@ Usually Dropbox simply hasn't finished downloading. Check the Dropbox icon,
 wait, try again. If it persists, the audio genuinely didn't get published.
 
 **A "conflicted copy" is mentioned**
-You both published at almost the same moment and Dropbox kept both files. One
+Two of you published at almost the same moment and Dropbox kept both files. One
 version is sitting in a file nobody is reading. Don't publish again until it's
 sorted — ask for help, because the extra file is the only copy of somebody's
 work.
@@ -128,7 +128,7 @@ stop and ask rather than guessing.
 **Check folder** tells you whether anything is wrong, and **History...** shows
 the last 20 versions — who published each, when, and how many tracks it had —
 with a Restore button. Restoring publishes the old version as a *new* one, so
-it doesn't rewind, your collaborator's copy notices, and what it replaces is
+it doesn't rewind, your collaborators's copy notices, and what it replaces is
 archived too. It changes only the shared folder; use **Pull from Bridge**
 afterwards to get it into your DAW.
 
@@ -156,14 +156,14 @@ python -m dawbridge.cli restore --folder "<the shared folder>" --revision 12
 
 Puts an old version back as the current shared version. It moves *forward* —
 publishing the old content as a new version rather than rewinding the counter
-— so your collaborator's copy actually notices the change, and the version it
+— so your collaborators's copy actually notices the change, and the version it
 replaced is kept too, which makes an unwanted restore undoable.
 
 ---
 
 ## Telling each other automatically (optional)
 
-DAWBridge can post to a Discord channel every time either of you publishes or
+DAWBridge can post to a Discord channel every time anyone publishes or
 loads, so nobody has to remember to say so.
 
 In Discord: **Server Settings → Integrations → Webhooks → New Webhook**, pick
@@ -178,16 +178,16 @@ Same thing from the command line, if you have the developer setup:
 python -m dawbridge.cli notify --folder "<the shared folder>" --webhook "<the url>" --test
 ```
 
-Set it up once and **both** of you post — the URL lives in the shared folder,
-so your collaborator's copy finds it and needs no setup. A channel only one of
-you reaches is worse than none.
+Set it up once and **everyone** posts — the URL lives in the shared folder,
+so your collaborators's copy finds it and needs no setup. A channel only some of
+you reach is worse than none.
 
 Messages say who, which DAW, the revision and how many tracks and clips. They
 never include file paths, audio, or anything from inside your session. If
 Discord is unreachable the sync still completes normally and the app says so
 in the log.
 
-**Turn off** removes the webhook for the project, so neither of you gets messages until it's set up again. To post only on publishes, use the same window.
+**Turn off** removes the webhook for the project, so nobody gets messages until it's set up again. To post only on publishes, use the same window.
 
 ---
 
