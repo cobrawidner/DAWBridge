@@ -32,13 +32,6 @@ from urllib.parse import urlparse
 
 CONFIG_NAME = "notify.json"
 
-# Per-machine mute switch. Absent means posting - handing the webhook URL
-# to DAWBridge is itself the consent, which is Travis's call and the
-# reason there is no extra step for the second person. This file exists
-# only so an individual can silence their own copy without deleting the
-# channel everyone else is using.
-_OPT_IN_PATH = Path.home() / ".dawbridge_notify.json"
-
 # Discord's own hosts, and nothing else. See rule 3 above.
 _ALLOWED_HOSTS = {"discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"}
 
@@ -74,9 +67,6 @@ def save_config(root: Path, config: dict) -> None:
     which is exactly the people already in the channel.
     """
     config_path(root).write_text(json.dumps(config, indent=2), encoding="utf-8")
-    # Setting the webhook up here is itself agreement to use it; nobody
-    # configures a channel and then wants to be asked again.
-    set_machine_opt_in(root, True)
 
 
 def webhook_url(root: Path) -> Optional[str]:
@@ -84,41 +74,12 @@ def webhook_url(root: Path) -> Optional[str]:
     return url or None
 
 
-def _opt_ins() -> dict:
-    try:
-        data = json.loads(_OPT_IN_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _opt_in_key(root: Path) -> str:
-    return str(Path(root).resolve())
-
-
-def machine_opted_in(root: Path) -> bool:
-    """Does this machine post to this folder's channel?
-
-    Absent means yes: a webhook in the shared folder is taken as consent,
-    so nobody has to configure anything twice. Only an explicit opt-out
-    is remembered.
-    """
-    return bool(_opt_ins().get(_opt_in_key(root), True))
-
-
-def set_machine_opt_in(root: Path, on: bool) -> None:
-    data = _opt_ins()
-    data[_opt_in_key(root)] = bool(on)
-    try:
-        _OPT_IN_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception:
-        pass  # a missing preference must never break a sync
-
-
 def is_enabled_for(root: Path, event: str) -> bool:
-    """Needs both a channel to post to and this machine's agreement to.
+    """On for both events once a webhook is configured.
 
-    Both events are on by default once those two hold. Knowing your
+    Handing the URL to DAWBridge is the consent, and the config lives with
+    the project rather than with a person - so the second machine sets up
+    nothing. Knowing your
     partner *loaded* your work is worth as much as knowing they
     published - it's the difference between "they have it" and "it's
     still sitting there".
@@ -126,8 +87,6 @@ def is_enabled_for(root: Path, event: str) -> bool:
     config = load_config(root)
     if not str(config.get("discord_webhook", "")).strip():
         return False
-    if not machine_opted_in(root):
-        return False  # this machine was explicitly muted
     events = config.get("events")
     if events is None:
         return True

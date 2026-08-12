@@ -187,7 +187,7 @@ never include file paths, audio, or anything from inside your session. If
 Discord is unreachable the sync still completes normally and the app says so
 in the log.
 
-**Mute this machine** stops your copy posting while leaving the channel working for everyone else. To post only on publishes, use the same window.
+**Turn off** removes the webhook for the project, so neither of you gets messages until it's set up again. To post only on publishes, use the same window.
 
 ---
 

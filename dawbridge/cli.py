@@ -439,20 +439,9 @@ def cmd_notify(args: argparse.Namespace) -> int:
         return 1
 
     if args.off:
-        # Opting this machine out, not tearing the channel down for the
-        # other person - those are different intentions and the second
-        # one is rarely what somebody means.
-        notify.set_machine_opt_in(root, False)
-        print("[notify] this machine is muted. The channel is still set up, and "
-              "whoever else uses this folder still posts to it.")
-        return 0
-
-    if args.on:
-        if not notify.webhook_url(root):
-            print("[notify] no webhook is set up for this folder yet.", file=sys.stderr)
-            return 1
-        notify.set_machine_opt_in(root, True)
-        print("[notify] this machine will now post to the channel.")
+        notify.config_path(root).unlink(missing_ok=True)
+        print("[notify] notifications turned off for this project - neither of you "
+              "will get messages until a webhook is set up again.")
         return 0
 
     if args.webhook:
@@ -473,11 +462,6 @@ def cmd_notify(args: argparse.Namespace) -> int:
     if not url:
         print("[notify] not configured. Set one up with:")
         print(f"    dawbridge notify --folder {args.folder} --webhook <discord webhook url>")
-        return 0
-
-    if not notify.machine_opted_in(root):
-        print("[notify] a channel is set up for this folder, but THIS machine is muted.")
-        print(f"[notify] unmute with: dawbridge notify --folder {args.folder} --on")
         return 0
 
     events = [e for e in ("publish", "load") if notify.is_enabled_for(root, e)]
@@ -523,10 +507,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--events", nargs="+", choices=["publish", "load"],
                    help="which events to post (default: both)")
     p.add_argument("--test", action="store_true", help="send a test message now")
-    p.add_argument("--on", action="store_true",
-                   help="let THIS machine post to the channel already set up here")
     p.add_argument("--off", action="store_true",
-                   help="stop THIS machine posting; leaves the channel set up for others")
+                   help="turn notifications off for this project")
     p.set_defaults(func=cmd_notify)
 
     p = sub.add_parser("restore")

@@ -15,18 +15,8 @@ import pytest
 from dawbridge import notify
 
 
-@pytest.fixture(autouse=True)
-def _isolated_opt_in(tmp_path, monkeypatch):
-    """Never let a test touch the real machine's consent file."""
-    monkeypatch.setattr(notify, "_OPT_IN_PATH", tmp_path / "opt_in.json")
-
-
-def _configure(tmp_path, opted_in=True, **config):
-    """A folder with a webhook. `opted_in` is this machine's consent,
-    which is deliberately separate - see test_a_fresh_machine_* below."""
+def _configure(tmp_path, **config):
     (tmp_path / notify.CONFIG_NAME).write_text(json.dumps(config), encoding="utf-8")
-    if opted_in:
-        notify.set_machine_opt_in(tmp_path, True)
     return tmp_path
 
 
@@ -96,44 +86,12 @@ def test_both_events_are_on_by_default(tmp_path):
 
 
 def test_a_second_machine_posts_without_being_configured(tmp_path):
-    """Travis's call: handing the URL to DAWBridge is the consent.
-
-    So the collaborator sets nothing up - their copy finds the webhook in
-    the shared folder and posts. A channel only one of you reaches is
-    worse than none.
-    """
-    root = _configure(tmp_path, opted_in=False,
-                      discord_webhook="https://discord.com/api/webhooks/1/a")
-
+    """Handing the URL to DAWBridge is the consent, and it lives with the
+    project - so the collaborator sets up nothing and their copy posts.
+    A channel only one of you reaches is worse than none."""
+    root = _configure(tmp_path, discord_webhook="https://discord.com/api/webhooks/1/a")
     assert notify.is_enabled_for(root, "publish") is True
     assert notify.is_enabled_for(root, "load") is True
-
-
-def test_muting_this_machine_leaves_the_shared_folder_alone(tmp_path):
-    root = _configure(tmp_path, discord_webhook="https://discord.com/api/webhooks/1/a")
-    before = (root / notify.CONFIG_NAME).read_text(encoding="utf-8")
-
-    notify.set_machine_opt_in(root, False)
-
-    assert notify.is_enabled_for(root, "publish") is False, "an explicit mute sticks"
-    assert (root / notify.CONFIG_NAME).read_text(encoding="utf-8") == before, (
-        "muting yourself must not dismantle the channel for your partner"
-    )
-
-
-def test_setting_the_webhook_up_is_itself_consent(tmp_path):
-    # Nobody configures a channel and then wants to be asked whether they
-    # meant it.
-    notify.save_config(tmp_path, {"discord_webhook": "https://discord.com/api/webhooks/1/a"})
-    assert notify.is_enabled_for(tmp_path, "publish") is True
-
-
-def test_opting_out_leaves_the_channel_configured_for_everyone_else(tmp_path):
-    root = _configure(tmp_path, discord_webhook="https://discord.com/api/webhooks/1/a")
-    notify.set_machine_opt_in(root, False)
-
-    assert notify.is_enabled_for(root, "publish") is False
-    assert notify.webhook_url(root), "your partner's channel is still set up"
 
 
 def test_a_corrupt_config_is_treated_as_absent(tmp_path):
