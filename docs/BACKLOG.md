@@ -247,6 +247,13 @@ state was redirected to a scratch file and confirmed untouched afterwards.
   side too** - a track added to canonical after the baseline survived,
   and an unchanged project correctly reported "no changes".
 
+**Track colour, 2026-08-11, both DAWs:** Reaper reads and writes exactly;
+Pro Tools snapped `#3F7FBF` to `#1D8DA4`, its nearest of 69, and then
+**three consecutive Pro Tools publishes left canonical still at
+`#3F7FBF`** - the accumulation guard holding, each cycle reporting "no
+changes". A genuine recolour still crossed. Forward compatibility holds:
+an old client parks `color` in `extra` and writes it back untouched.
+
 Not exercised live: the `unavailable_reason` "running but refused"
 branch, which needs a Pro Tools that accepts a connection and then
 rejects the command.
@@ -340,6 +347,22 @@ Recorded so nobody spends a session rediscovering the reasoning.
   `SpotClipsByID` are both relative to session start, consistently. This
   was proposal 11, and the feared 3600-second silent offset does not
   exist.
+- **Reaper's `I_CUSTOMCOLOR` is a trap; use `GetTrackColor`.** Measured
+  live: a brand-new track nobody has coloured still reads `16576`
+  (`0x0040C0`) from `I_CUSTOMCOLOR`, because only the `0x1000000` flag
+  bit distinguishes "chosen" from "default". Reading the raw integer
+  would publish an orange nobody picked for every uncoloured track.
+  `GetTrackColor` answers 0 for "no custom colour".
+- **Pro Tools colour is read-free, write-palette-only.** The `Track`
+  message from `track_list()` already carries `color` as `#AARRGGBB`, so
+  reading needs no new command. `SetTrackColor` takes only a palette
+  index, **1-based**, valid `[1;69]` - verified by walking the ends.
+  Nearest-match is therefore necessary, and Travis accepted it.
+- **py-ptsl serialises empty one-of selectors.** It sets
+  `always_print_fields_with_no_presence=True`, so a command with two
+  mutually exclusive selectors sends both and Pro Tools refuses. Fixed
+  per-command with a `json_messup` override. Any future command of that
+  shape will hit the same thing.
 - **PTSL has no tempo, meter, marker or time-signature command** — re-verified
   against the installed protobufs: 276 commands, none of them.
 - **Distribution is GitHub Releases, built by CI.** `git tag v0.x.0 &&
@@ -370,6 +393,11 @@ Recorded so nobody spends a session rediscovering the reasoning.
 - **Size work to survive being cut off.** Three agent runs have been killed
   mid-task by API session limits. Settle and record one question at a time
   rather than doing all the setup and leaving the answers to the end.
-- **The full suite runs with no DAW open** — 284 tests at time of writing. So
+- **The full suite runs with no DAW open** — 284 tests at time of writing.
+- **`EnumProjects` returns a NULL project as the *string*
+  `'(ReaProject*)0x0000000000000000'`, which is truthy.** A naive
+  `while proj:` enumeration never terminates. Nothing shipping does this,
+  but it is a live landmine for the tab-safety check the safety rules
+  ask for. So
   most work here is possible from a cloud checkout; only live verification
   isn't.

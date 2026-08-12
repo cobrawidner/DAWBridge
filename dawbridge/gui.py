@@ -524,6 +524,8 @@ class DawBridgeGUI(ttk.Frame):
             lines.append(f"    REMOVE  {name} - you deleted it")
         for name in plan.kept_theirs:
             lines.append(f"    KEEP    {name} - your partner's, left untouched")
+        for name in plan.recoloured:
+            lines.append(f"    COLOUR  {name} - recoloured")
         for name in plan.conflicts:
             lines.append(f"[push][warning] you both changed {name!r}; "
                          f"yours is being published over theirs")
@@ -719,6 +721,10 @@ class DawBridgeGUI(ttk.Frame):
                              + (f" - {mc.detail}" if mc.detail else ""))
             else:
                 lines.append(f"    ORPHAN  marker {mc.name} @ {at(mc.from_time)} - left alone")
+
+        for cc in preview.colour_changes:
+            lines.append(f"    COLOUR  {cc.track_name}: "
+                         f"{cc.from_colour or 'none'} -> {cc.to_colour}")
 
         if preview.untouched_tracks or preview.untouched_clips:
             lines.append(f"    unchanged: {preview.untouched_tracks} track(s), "

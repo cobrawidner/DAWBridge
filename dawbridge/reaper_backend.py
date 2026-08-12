@@ -33,6 +33,17 @@ checking them actually showed:
   - Fades round-trip exactly: written 0.25/0.5, read back 0.25/0.5.
   - Markers are beat-attached, so a tempo change moves them too (12.5s
     became 16.667s on a 120 -> 90 change).
+  - **`I_CUSTOMCOLOR` is a trap.** A track nobody has ever coloured still
+    reads a non-zero value out of it - a brand new track gave `16576`
+    (0x0040C0) - because only the `0x1000000` flag bit says whether a
+    custom colour was actually set. Reading the number would have given
+    every uncoloured track in the project an orange nobody chose, and
+    published it. `GetTrackColor` answers 0 for "no custom colour" and
+    `native | 0x1000000` otherwise, and `SetTrackColor` sets the flag for
+    you, so those are what this backend uses. The packing underneath is
+    BGR on Windows (pure red is 0x0000FF) but is per-platform, so
+    `ColorToNative`/`ColorFromNative` do the conversion rather than any
+    byte shifting here. Persists to the .rpp as `PEAKCOL <flagged int>`.
 
 Still unverified: nothing in the clip push/pull path has been exercised
 end to end against Reaper - only the marker, fade and tempo paths above.
@@ -50,6 +61,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from . import color
 from .backend import Backend, LiveClip, LiveMarker, LiveTrack, missing_client_library_reason
 from .model import Clip, Marker, Session, Track, new_id
 from .sync import (
@@ -159,6 +171,52 @@ def _write_ext_id(getset, native_id, bridge_id: str) -> None:
         getset(native_id, _EXT_ID_KEY, bridge_id, True)
     except Exception:
         pass
+
+
+def _read_track_colour(RPR, native_id) -> str | None:
+    """A track's colour as "#RRGGBB", or None when it has no custom one.
+
+    `GetTrackColor`, NOT `I_CUSTOMCOLOR`. Measured live on Reaper 7.78: a
+    brand new track that nobody has ever coloured still reads `16576`
+    (0x0040C0) out of `I_CUSTOMCOLOR`, because only the `0x1000000` flag
+    bit distinguishes "the user picked this" from leftover default. Using
+    the raw number would have published an orange nobody chose for every
+    uncoloured track in the project - silent, wrong, and exactly the kind
+    of damage this codebase keeps finding. `GetTrackColor` answers 0 for
+    "no custom colour" and `native | 0x1000000` otherwise.
+
+    `ColorFromNative` unpacks it because the packing is per-platform -
+    Windows is BGR (measured: pure red is 0x0000FF) and macOS is not.
+    """
+    try:
+        native = int(RPR.GetTrackColor(native_id))
+    except Exception:
+        return None
+    if not native:
+        return None
+    try:
+        _native, r, g, b = RPR.ColorFromNative(native & 0xFFFFFF, 0, 0, 0)
+    except Exception:
+        return None
+    return color.to_hex(r, g, b)
+
+
+def _write_track_colour(RPR, native_id, value) -> None:
+    """Give a track canonical's colour. Reaper can show any of them
+    exactly, so nothing is approximated on this side.
+
+    A canonical colour of None writes nothing rather than clearing what
+    the track already has: pushing into a DAW never takes anything away,
+    and "the shared session doesn't know this track's colour" is not the
+    same statement as "this track should have no colour".
+    """
+    rgb = color.rgb(value)
+    if rgb is None:
+        return
+    try:
+        RPR.SetTrackColor(native_id, RPR.ColorToNative(*rgb))
+    except Exception:
+        pass  # cosmetic; never worth failing a push that placed real audio
 
 
 def _parse_rpp_markers(text: str) -> list[dict] | None:
@@ -384,6 +442,7 @@ class ReaperBackend(Backend):
                     name=base_name,
                     channels=int(RPR.GetMediaTrackInfo_Value(native_track.id, "I_NCHAN")),
                     muted=native_track.is_muted,
+                    color=_read_track_colour(RPR, native_track.id),
                     clips=clips,
                     native=native_track,
                 )
@@ -710,6 +769,12 @@ class ReaperBackend(Backend):
             # Unlike channels, mute always reflects the live DAW - captured
             # fresh on every pull, not just when the track is first adopted.
             track.muted = native_track.is_muted
+            # No quantiser: Reaper can display any colour it is given, so
+            # "what canonical says" and "what Reaper shows" are directly
+            # comparable. Pro Tools is the side that needs the guard.
+            track.color = color.resolve_captured(
+                track.color, _read_track_colour(RPR, native_track.id)
+            )
             if decision.write_name_tag:
                 # Either a brand new adoption, or a name whose tag was
                 # tidied away and has just been recovered from the id
@@ -920,6 +985,7 @@ class ReaperBackend(Backend):
             native_track = project.tracks[new_index]
             RPR.SetMediaTrackInfo_Value(native_track.id, "I_NCHAN", max(2, track.channels))
             native_track.is_muted = track.muted
+            _write_track_colour(RPR, native_track.id, track.color)
             local_tag_to_track[track.id] = native_track
             self._push_clips(native_track, track, store, warnings)
 
@@ -930,6 +996,11 @@ class ReaperBackend(Backend):
                     native_track.id, "P_NAME", tag(track.name, track.id), True
                 )
             native_track.is_muted = track.muted
+            # Only when it would actually change something - every RPR call
+            # is a round trip over reapy's remote API, and rewriting the
+            # colour a track already has is a cost with no effect.
+            if not color.same(track.color, _read_track_colour(RPR, native_track.id)):
+                _write_track_colour(RPR, native_track.id, track.color)
             self._push_clips(native_track, track, store, warnings)
 
         try:

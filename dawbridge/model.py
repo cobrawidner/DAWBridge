@@ -130,6 +130,14 @@ class Track:
     order: int = 0
     channels: int = 2  # channel width (1 = mono, 2 = stereo); must match on both sides
     muted: bool = False  # synced every pull/push - see model.py docstring
+    #: Track colour as a neutral "#RRGGBB", or None for "no colour set".
+    #: Neither DAW speaks this natively and they don't agree with each
+    #: other - Reaper stores a BGR-packed OS integer, Pro Tools can only
+    #: be SET to one of 69 palette entries - so the colour that comes
+    #: back from a round trip is a near match, not the same number. That
+    #: was accepted deliberately; see color.py for what each side really
+    #: stores and for the guard that stops the approximation compounding.
+    color: Optional[str] = None
     clips: list[Clip] = field(default_factory=list)
     extra: dict = field(default_factory=dict, repr=False, compare=False)
 

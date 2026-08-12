@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import color
 from .model import Clip, Marker, Session, Track
 
 
@@ -176,11 +177,31 @@ class MarkerChange:
 
 
 @dataclass
+class ColourChange:
+    """One track being recoloured by a push.
+
+    In its own list for the same reason MarkerChange is, and it matters
+    more here: a recolour is the one change in the whole preview that
+    nobody needs to think about before it happens. It is cosmetic, it
+    cannot touch audio, and it must never read as destructive.
+
+    `to_colour` is what canonical asks for, which for Pro Tools is not
+    quite what will appear - it can only show the nearest of 69 palette
+    entries. Recording what was asked for rather than what will be shown
+    keeps this honest about where the approximation happens.
+    """
+    track_name: str
+    from_colour: str | None
+    to_colour: str | None
+
+
+@dataclass
 class PushPreview:
     """What a push would do, without doing any of it."""
     track_changes: list[TrackChange] = field(default_factory=list)
     clip_changes: list[ClipChange] = field(default_factory=list)
     marker_changes: list[MarkerChange] = field(default_factory=list)
+    colour_changes: list[ColourChange] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     untouched_tracks: int = 0
     untouched_clips: int = 0
@@ -190,8 +211,13 @@ class PushPreview:
         # Markers count. Without them, a push that only moves the chorus
         # marker reports "nothing to do" and both front ends skip the
         # push entirely - the change would be previewed and then not
-        # happen.
-        return not self.track_changes and not self.clip_changes and not self.marker_changes
+        # happen. Colours count for exactly the same reason.
+        return (
+            not self.track_changes
+            and not self.clip_changes
+            and not self.marker_changes
+            and not self.colour_changes
+        )
 
     def summary_line(self) -> str:
         creates = sum(1 for t in self.track_changes if t.kind == "create")
@@ -212,6 +238,10 @@ class PushPreview:
         if reaudio: parts.append(f"{reaudio} clip(s) re-pointed to different audio")
         if marker_adds: parts.append(f"{marker_adds} marker(s) added")
         if marker_moves: parts.append(f"{marker_moves} marker(s) moved/renamed")
+        # Named here even though the front ends don't list colours line by
+        # line: is_empty counts them, so without this the summary could
+        # read "no changes" on a pull that then went and did something.
+        if self.colour_changes: parts.append(f"{len(self.colour_changes)} track(s) recoloured")
         if orphans: parts.append(f"{orphans} orphan(s) left alone")
         return ", ".join(parts) if parts else "no changes - the DAW already matches the shared session"
 
@@ -265,6 +295,13 @@ def preview_push(
         if live.muted != track.muted:
             preview.track_changes.append(
                 TrackChange(name=track.name, kind="mute" if track.muted else "unmute")
+            )
+            changed_here = True
+        if _colour_would_change(track.color, live.color, target):
+            preview.colour_changes.append(
+                ColourChange(track_name=track.name,
+                             from_colour=color.normalise(live.color),
+                             to_colour=color.normalise(track.color))
             )
             changed_here = True
 
@@ -351,6 +388,41 @@ def preview_push(
                 )
 
     return preview
+
+
+def colour_quantiser(target: str):
+    """How `target` mangles a colour on its way to the screen, or None
+    when it shows what it's given.
+
+    Pro Tools can only be set to one of 69 palette entries, so asking it
+    for #3F7FBF gets you the nearest of those. Every comparison involving
+    a Pro Tools colour has to go through this or it will report a
+    difference that Pro Tools has no way to resolve - and then report it
+    again on the next pull, forever, because applying the colour cannot
+    make the difference go away.
+
+    Uses `color.PROTOOLS_TRACK_PALETTE` rather than the running Pro
+    Tools' own palette because this module never has an engine to ask.
+    The backend, which does, always asks. See that constant's comment for
+    why the copy is safe.
+    """
+    if target == "protools":
+        return lambda value: color.nearest(value, color.PROTOOLS_TRACK_PALETTE)
+    return None
+
+
+def _colour_would_change(canonical_colour, live_colour, target: str) -> bool:
+    """Whether pushing `canonical_colour` would visibly change this track.
+
+    Says no when canonical has no colour: a push never strips a colour
+    the DAW already has (there is nothing to put there instead), which
+    matches every other "loading into a DAW never deletes" rule.
+    """
+    if color.normalise(canonical_colour) is None:
+        return False
+    quantise = colour_quantiser(target)
+    wanted = color.normalise(canonical_colour) if quantise is None else quantise(canonical_colour)
+    return not color.same(wanted, live_colour)
 
 
 def _preview_markers(preview: PushPreview, canonical: Session, live_markers) -> None:
@@ -516,11 +588,18 @@ class PublishPlan:
     kept_theirs: list[str] = field(default_factory=list)  # your partner's, left untouched
     unchanged: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)  # both changed; yours won, loudly
+    #: You recoloured them and changed nothing else. Kept apart from
+    #: `updated` because a colour is cosmetic: it must be enough to make
+    #: the publish happen, and never enough to make it look dangerous.
+    recoloured: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     @property
     def touches_anything(self) -> bool:
-        return bool(self.added or self.updated or self.removed)
+        # Recolours count, or a publish whose only change is a colour
+        # reports "no changes" and the front ends skip it - the colour
+        # would be described and then never sent.
+        return bool(self.added or self.updated or self.removed or self.recoloured)
 
     def summary_line(self) -> str:
         """One line for a human deciding whether to publish.
@@ -542,6 +621,8 @@ class PublishPlan:
             parts.append(f"{len(self.updated)} track(s) updated")
         if self.removed:
             parts.append(f"{len(self.removed)} track(s) removed ({', '.join(self.removed)})")
+        if self.recoloured:
+            parts.append(f"{len(self.recoloured)} track(s) recoloured")
         if self.kept_theirs:
             parts.append(f"{len(self.kept_theirs)} of your partner's track(s) left alone")
         if self.unchanged:
@@ -583,10 +664,36 @@ def _track_fingerprint(track: Track) -> tuple:
 
 
 def tracks_equivalent(a: Track | None, b: Track | None) -> bool:
-    """Whether two versions of a track are the same arrangement."""
+    """Whether two versions of a track are the same arrangement.
+
+    Colour is deliberately NOT part of this. `plan_publish` uses this
+    same answer to decide what counts as a conflict, and a track you and
+    your partner both recoloured must not produce "you have both changed
+    this track, there is no merge, your version is being published over
+    theirs" and a confirmation dialog. Colour is handled separately, and
+    quietly, by `_should_publish_my_colour`.
+    """
     if a is None or b is None:
         return a is b
     return _track_fingerprint(a) == _track_fingerprint(b)
+
+
+def _should_publish_my_colour(mine, theirs, was, had_baseline: bool) -> bool:
+    """Whether a publish should carry YOUR colour for a track whose
+    arrangement both sides already agree on.
+
+    The same three-way reasoning `plan_publish` applies to arrangement -
+    a colour your partner changed and you didn't is theirs to keep - with
+    one deliberate difference. When you have BOTH recoloured it, yours
+    wins silently. A colour cannot destroy work, so raising it as a
+    conflict would put a "there is no merge" warning and a confirmation
+    in front of somebody whose crime was recolouring a track.
+    """
+    if color.same(mine, theirs):
+        return False
+    if had_baseline and color.same(mine, was) and not color.same(theirs, was):
+        return False  # they recoloured it, you didn't - leave it alone
+    return True
 
 
 def plan_publish(
@@ -626,12 +733,25 @@ def plan_publish(
             plan.added.append(track.name)
             continue
 
+        was = None if baseline_by_id is None else baseline_by_id.get(track.id)
+
         if tracks_equivalent(track, theirs):
-            plan.tracks.append(theirs)
-            plan.unchanged.append(track.name)
+            # Same arrangement, so the only thing left that can differ is
+            # the colour. Publishing yours here is the whole reason a
+            # recolour crosses the bridge at all, and it lands in its own
+            # list so nothing downstream mistakes it for a real edit.
+            if _should_publish_my_colour(
+                track.color, theirs.color,
+                was.color if was is not None else None,
+                was is not None,
+            ):
+                plan.tracks.append(track)
+                plan.recoloured.append(track.name)
+            else:
+                plan.tracks.append(theirs)
+                plan.unchanged.append(track.name)
             continue
 
-        was = None if baseline_by_id is None else baseline_by_id.get(track.id)
         i_changed = was is None or not tracks_equivalent(track, was)
         they_changed = was is not None and not tracks_equivalent(theirs, was)
 

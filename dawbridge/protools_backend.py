@@ -62,6 +62,30 @@ again in a future release:
     these two rows back into one logical clip on pull, or it would double
     every stereo clip.
 
+TRACK COLOUR is asymmetric, and the asymmetry is the whole story.
+Reading is free - the `Track` message `track_list()` already returns
+carries `color` as an `#AARRGGBB` string (e.g. `#ff13355f`, alpha always
+ff), so no extra command is needed. Writing is palette-only:
+`SetTrackColor` takes a `color_index` and nothing else, 1-based into
+`GetColorPalette(CPTarget_Tracks)`, valid range [1;69] (measured - 0 and
+70 are both rejected with `PT_InvalidParameter (color_index should be in
+the range [1;69])`). So a colour arriving from Reaper is snapped to the
+nearest of 69 and that cannot be improved on. Accepted deliberately; see
+color.py for the guard that stops the approximation compounding.
+
+Two traps came with it:
+  - py-ptsl wraps NEITHER command (both are `# TODO` in its engine), so
+    they are built as bare `ops.Operation` subclasses, like SpotClipsByID
+    and ImportAudioToClipList already are.
+  - `SetTrackColor` has two mutually exclusive selectors (`track_ids`,
+    `track_names`) and py-ptsl serialises requests with
+    `always_print_fields_with_no_presence=True`, so BOTH go out - one of
+    them empty - and Pro Tools refuses the call outright with "Only one
+    of 'track_ids' and 'track_names' must be defined". A `json_messup`
+    override dropping the empty one fixes it. This is the first command
+    here to hit that py-ptsl behaviour; any future command with a
+    one-of-these selector pair will hit it too.
+
 KNOWN GAP: automation curves are not exposed by PTSL as of this writing
 (no Get/SetAutomation-style command in the protocol's command table), so
 this backend does not attempt to read or write automation. See the
@@ -110,7 +134,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import audiofile
+from . import audiofile, color
 from .backend import Backend, LiveClip, LiveMarker, LiveTrack, missing_client_library_reason
 from .model import Clip, Marker, Session, Track, new_id
 from .sync import (
@@ -243,6 +267,7 @@ class ProToolsBackend(Backend):
                     name=base_name,
                     channels=_track_channels(native_track),
                     muted=muted_by_track.get(key, False),
+                    color=_native_track_colour(native_track),
                     clips=clips,
                     native=native_track,
                 )
@@ -467,6 +492,9 @@ class ProToolsBackend(Backend):
 
         native_tracks = engine.track_list()
         clips_by_track, muted_by_track = self._pull_clips_via_text_export(engine, warnings)
+        # Read once for the whole pull rather than per track: it is a
+        # round trip to Pro Tools and the palette cannot change mid-pull.
+        palette = _read_colour_palette(engine)
 
         # None (not {}) means the text export failed rather than came back
         # empty, and the difference is everything: every clip this backend
@@ -520,6 +548,22 @@ class ProToolsBackend(Backend):
             # Unlike channels, mute always reflects the live DAW -
             # captured fresh on every pull, not just on first adopt.
             track.muted = muted_by_track.get(key, False)
+            # THE DRIFT GUARD. Pro Tools can only be set to one of 69
+            # palette entries, so a colour that arrived here as #3F7FBF is
+            # on screen as the nearest of those. Reading that back and
+            # publishing it would replace the original with an
+            # approximation, and the next round trip would approximate the
+            # approximation. Comparing through the palette means a colour
+            # Pro Tools is already showing as closely as it can counts as
+            # unchanged - the same idea as sync's move tolerance, which
+            # compares positions at the resolution that matters rather
+            # than exactly. Without a palette there is nothing to compare
+            # through, so nothing is claimed.
+            track.color = color.resolve_captured(
+                track.color,
+                _native_track_colour(native_track),
+                quantise=(lambda value: color.nearest(value, palette)) if palette else None,
+            )
             if bridge_id is None:
                 # Same exposure as the clip rename below - a refusal here
                 # must not cost the whole publish.
@@ -901,6 +945,7 @@ class ProToolsBackend(Backend):
                 pass
 
             native_tracks = engine.track_list()
+            palette = _read_colour_palette(engine)
 
             # Everything below recovers which clips are on which track by
             # parsing the session text export, which can only be keyed by
@@ -971,6 +1016,7 @@ class ProToolsBackend(Backend):
                     native_track = next(t for t in engine.track_list() if t.name == tag(track.name, track.id))
                     local_tag_to_track[track.id] = native_track
                     engine.set_track_mute_state(track_names=[native_track.name], new_state=track.muted)
+                    self._apply_track_colour(engine, native_track, track, palette)
                     self._push_clips(engine, native_track, track, store, warnings, local_clip_ids=set())
                 except Exception as exc:
                     warnings.append(f"track {track.name!r} failed to create in Pro Tools: {exc}; skipped")
@@ -1003,6 +1049,7 @@ class ProToolsBackend(Backend):
                     # the rename above just ran, native_track is a local
                     # snapshot from before it and its .name is now stale.
                     engine.set_track_mute_state(track_names=[tag(track.name, track.id)], new_state=track.muted)
+                    self._apply_track_colour(engine, native_track, track, palette)
                     self._push_clips(engine, native_track, track, store, warnings, local_clip_ids)
                 except Exception as exc:
                     warnings.append(f"track {track.name!r} failed to update in Pro Tools: {exc}; skipped")
@@ -1020,6 +1067,36 @@ class ProToolsBackend(Backend):
             engine.save_session()
 
         return warnings
+
+    def _apply_track_colour(self, engine, native_track, track: Track, palette: list[str]) -> None:
+        """Give a Pro Tools track the nearest palette entry to canonical's
+        colour.
+
+        Nearest, because there is no other option: `SetTrackColor` takes a
+        palette index and PTSL exposes no arbitrary-RGB write. Travis
+        accepted that ("I think we can live with colors not being exact"),
+        so this does not warn - a warning that fires on nearly every push,
+        about something already decided, is the kind people learn to skim.
+
+        Deliberately silent on failure. A colour is the least important
+        thing in a push: it cannot affect audio, and losing the whole
+        push's warnings to a colour is a bad trade.
+        """
+        if not palette or not track.color:
+            return
+        wanted = color.nearest(track.color, palette)
+        if wanted is None or color.same(wanted, _native_track_colour(native_track)):
+            return  # already as close as Pro Tools can get - don't spend a call
+        track_id = getattr(native_track, "id", "")
+        if not track_id:
+            return
+        try:
+            # +1: the palette comes back 0-indexed from GetColorPalette and
+            # SetTrackColor counts from 1. Measured, not assumed - index 1
+            # sets the first entry and 0 is rejected outright.
+            _set_track_colour(engine, track_id, palette.index(wanted) + 1)
+        except Exception:
+            pass
 
     def _push_clips(
         self, engine, native_track, track: Track, store, warnings: list[str], local_clip_ids: set[str]
@@ -1407,6 +1484,78 @@ def _track_channels(native_track) -> int:
     from ptsl.PTSL_pb2 import TrackFormat
 
     return 2 if native_track.format == TrackFormat.TF_Stereo else 1
+
+
+def _native_track_colour(native_track) -> str | None:
+    """A Pro Tools track's colour as "#RRGGBB", or None.
+
+    Free: the `Track` message `engine.track_list()` already returns
+    carries it, so no extra command is needed to read one (the backlog
+    only knew about SetTrackColor/GetColorPalette and assumed reading
+    would be the hard half). The wire format is `#AARRGGBB` with the
+    alpha always `ff` - measured live, e.g. `#ff13355f`.
+    """
+    return color.normalise(getattr(native_track, "color", None))
+
+
+def _read_colour_palette(engine) -> list[str]:
+    """Pro Tools' track colour palette in `SetTrackColor` index order, or
+    [] when it can't be read.
+
+    [] is not a lie about Pro Tools having no colours - it means "don't
+    touch colours this time round", which is what every caller does with
+    it. Reading the palette from the running Pro Tools rather than from a
+    baked-in list means the index we then write can't be off by one
+    against a future release.
+    """
+    import ptsl.ops as ops
+    from ptsl.PTSL_pb2 import CPTarget_Tracks
+
+    class CId_GetColorPalette(ops.Operation):
+        pass
+
+    try:
+        op = CId_GetColorPalette(color_palette_target=CPTarget_Tracks)
+        engine.client.run(op)
+    except Exception:
+        return []
+    return [c for c in (color.normalise(entry) for entry in op.response.color_list) if c]
+
+
+def _set_track_colour(engine, track_id: str, palette_index: int) -> None:
+    """Set one track's colour to palette entry `palette_index`.
+
+    The index is **1-based** and Pro Tools rejects anything outside
+    [1;69] outright (measured: 0 and 70 both come back
+    `PT_InvalidParameter (color_index should be in the range [1;69])`).
+
+    py-ptsl wraps neither this command nor GetColorPalette - both are
+    `# TODO` in its engine - so the operation is built directly, the same
+    way SpotClipsByID and ImportAudioToClipList already are.
+
+    The `json_messup` is not optional. `SetTrackColor` takes two mutually
+    exclusive selectors, and py-ptsl serialises requests with
+    `always_print_fields_with_no_presence=True`, so BOTH `track_ids` and
+    `track_names` go out - one of them empty - and Pro Tools refuses the
+    whole call with "Only one of 'track_ids' and 'track_names' must be
+    defined". Measured; this is the first command in this backend to hit
+    that particular py-ptsl behaviour.
+    """
+    import json
+
+    import ptsl.ops as ops
+
+    class CId_SetTrackColor(ops.Operation):
+        def json_messup(self, in_json: str) -> str:
+            data = json.loads(in_json)
+            if not data.get("track_ids"):
+                data.pop("track_ids", None)
+            if not data.get("track_names"):
+                data.pop("track_names", None)
+            return json.dumps(data)
+
+    op = CId_SetTrackColor(track_ids=[track_id], color_index=palette_index)
+    engine.client.run(op)
 
 
 def _duplicate_native_names(native_tracks) -> dict[str, int]:

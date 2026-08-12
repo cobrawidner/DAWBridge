@@ -107,6 +107,11 @@ def _print_preview(preview, session, folder: Path, daw: str) -> None:
                 print(f"    ORPHAN  {mc.name} @ {_at(mc.from_time)} "
                       f"- in your DAW but not in the shared session; left alone")
 
+    if preview.colour_changes:
+        print("\n  colours:")
+        for cc in preview.colour_changes:
+            print(f"    COLOUR  {cc.track_name}: {cc.from_colour or 'none'} -> {cc.to_colour}")
+
     if preview.untouched_tracks or preview.untouched_clips:
         print(f"\n  unchanged: {preview.untouched_tracks} track(s), {preview.untouched_clips} clip(s)")
 
@@ -219,6 +224,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
         print(f"    REMOVE  {name} - you deleted it")
     for name in plan.kept_theirs:
         print(f"    KEEP    {name} - your partner's, left untouched")
+    for name in plan.recoloured:
+        print(f"    COLOUR  {name} - recoloured")
     for name in plan.conflicts:
         print(f"[dawbridge][warning] you both changed {name!r}; yours is being published "
               f"over theirs")

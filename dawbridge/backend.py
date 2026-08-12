@@ -63,6 +63,10 @@ class LiveTrack:
     name: str  # base name, bridge tag stripped
     channels: int = 2
     muted: bool = False
+    #: The track's colour as "#RRGGBB", or None when this DAW isn't
+    #: reporting one. None is NOT "no colour" - see color.resolve_captured;
+    #: a preview may not claim a colour change it can't substantiate.
+    color: Optional[str] = None
     clips: list[LiveClip] = field(default_factory=list)
     native: Any = None  # opaque DAW handle, for backends that need it
 
