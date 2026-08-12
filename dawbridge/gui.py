@@ -466,8 +466,14 @@ class DawBridgeGUI(ttk.Frame):
         def say(text: str, colour: str = theme.READOUT_INK) -> None:
             status.configure(text=text, foreground=colour)
 
-        say("Configured. Both machines post to this channel."
-            if notify.webhook_url(folder) else "Not set up yet.")
+        if not notify.webhook_url(folder):
+            say("Not set up yet.")
+        elif notify.machine_opted_in(folder):
+            say("On. This machine posts to the channel.", theme.READOUT_GOOD)
+        else:
+            say("A channel is set up for this folder, but this machine has not "
+                "agreed to post to it. Press Save to turn it on here.",
+                theme.READOUT_WARN)
 
         def save(and_test: bool = False) -> None:
             url = url_var.get().strip()
@@ -498,14 +504,17 @@ class DawBridgeGUI(ttk.Frame):
                 say("Test message sent - check the channel.", theme.READOUT_GOOD)
 
         def turn_off() -> None:
+            # Opt this machine out rather than deleting the shared config:
+            # "stop telling Discord about me" and "dismantle our channel"
+            # are different intentions, and this button is the first.
             try:
-                notify.config_path(folder).unlink(missing_ok=True)
+                notify.set_machine_opt_in(folder, False)
             except Exception as exc:  # noqa: BLE001
                 say(f"Could not turn off: {exc}", theme.READOUT_CRIT)
                 return
-            url_var.set("")
-            say("Turned off for this shared folder.", theme.READOUT_INK)
-            self._log("[notify] notifications turned off.")
+            say("This machine will no longer post. The channel is still set up "
+                "for whoever else uses this folder.", theme.READOUT_INK)
+            self._log("[notify] this machine opted out of notifications.")
 
         row = ttk.Frame(body, style="Chassis.TFrame")
         row.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 0))
@@ -513,7 +522,7 @@ class DawBridgeGUI(ttk.Frame):
         ttk.Button(row, text="Save and send test",
                    command=lambda: save(and_test=True)).pack(side="left", padx=(8, 0))
         theme.separator(row, orient="vertical").pack(side="left", fill="y", padx=14)
-        ttk.Button(row, text="Turn off", command=turn_off).pack(side="left")
+        ttk.Button(row, text="Turn off here", command=turn_off).pack(side="left")
         ttk.Button(row, text="Close", command=win.destroy).pack(side="left", padx=(8, 0))
         entry.focus_set()
 

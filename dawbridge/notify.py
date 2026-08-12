@@ -32,6 +32,13 @@ from urllib.parse import urlparse
 
 CONFIG_NAME = "notify.json"
 
+# Consent lives here, on the machine, and never in the shared folder.
+# The URL is shared so one person sets the channel up once; agreeing to
+# post to it is a separate decision each person makes for themselves.
+# Without this split, picking the shared folder silently enrolled you in
+# posting to somebody else's Discord.
+_OPT_IN_PATH = Path.home() / ".dawbridge_notify.json"
+
 # Discord's own hosts, and nothing else. See rule 3 above.
 _ALLOWED_HOSTS = {"discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"}
 
@@ -67,6 +74,9 @@ def save_config(root: Path, config: dict) -> None:
     which is exactly the people already in the channel.
     """
     config_path(root).write_text(json.dumps(config, indent=2), encoding="utf-8")
+    # Setting the webhook up here is itself agreement to use it; nobody
+    # configures a channel and then wants to be asked again.
+    set_machine_opt_in(root, True)
 
 
 def webhook_url(root: Path) -> Optional[str]:
@@ -74,15 +84,48 @@ def webhook_url(root: Path) -> Optional[str]:
     return url or None
 
 
-def is_enabled_for(root: Path, event: str) -> bool:
-    """Both events are on by default once a URL exists.
+def _opt_ins() -> dict:
+    try:
+        data = json.loads(_OPT_IN_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
-    Knowing your partner *loaded* your work is worth as much as knowing
-    they published - it's the difference between "they have it" and
-    "it's still sitting there".
+
+def _opt_in_key(root: Path) -> str:
+    return str(Path(root).resolve())
+
+
+def machine_opted_in(root: Path) -> bool:
+    """Has *this machine* agreed to post to this folder's channel?
+
+    Absent means no. A first launch posts nothing, whatever the shared
+    folder already contains.
+    """
+    return bool(_opt_ins().get(_opt_in_key(root), False))
+
+
+def set_machine_opt_in(root: Path, on: bool) -> None:
+    data = _opt_ins()
+    data[_opt_in_key(root)] = bool(on)
+    try:
+        _OPT_IN_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass  # a missing preference must never break a sync
+
+
+def is_enabled_for(root: Path, event: str) -> bool:
+    """Needs both a channel to post to and this machine's agreement to.
+
+    Both events are on by default once those two hold. Knowing your
+    partner *loaded* your work is worth as much as knowing they
+    published - it's the difference between "they have it" and "it's
+    still sitting there".
     """
     config = load_config(root)
     if not str(config.get("discord_webhook", "")).strip():
+        return False
+    if not machine_opted_in(root):
         return False
     events = config.get("events")
     if events is None:

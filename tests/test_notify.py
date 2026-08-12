@@ -15,8 +15,18 @@ import pytest
 from dawbridge import notify
 
 
-def _configure(tmp_path, **config):
+@pytest.fixture(autouse=True)
+def _isolated_opt_in(tmp_path, monkeypatch):
+    """Never let a test touch the real machine's consent file."""
+    monkeypatch.setattr(notify, "_OPT_IN_PATH", tmp_path / "opt_in.json")
+
+
+def _configure(tmp_path, opted_in=True, **config):
+    """A folder with a webhook. `opted_in` is this machine's consent,
+    which is deliberately separate - see test_a_fresh_machine_* below."""
     (tmp_path / notify.CONFIG_NAME).write_text(json.dumps(config), encoding="utf-8")
+    if opted_in:
+        notify.set_machine_opt_in(tmp_path, True)
     return tmp_path
 
 
@@ -83,6 +93,51 @@ def test_both_events_are_on_by_default(tmp_path):
     root = _configure(tmp_path, discord_webhook="https://discord.com/api/webhooks/1/a")
     assert notify.is_enabled_for(root, "publish")
     assert notify.is_enabled_for(root, "load")
+
+
+def test_a_fresh_machine_posts_nothing_even_though_the_folder_is_configured(tmp_path):
+    """The whole point of separating consent from the URL.
+
+    The webhook lives in the shared folder so one person sets the channel
+    up once. But picking that folder must not enrol you in posting to
+    someone else's Discord without you ever agreeing - which is what
+    happened before this split.
+    """
+    root = _configure(tmp_path, opted_in=False,
+                      discord_webhook="https://discord.com/api/webhooks/1/a")
+
+    assert notify.webhook_url(root), "the URL is there to be found"
+    assert notify.machine_opted_in(root) is False
+    assert notify.is_enabled_for(root, "publish") is False
+    assert notify.is_enabled_for(root, "load") is False
+
+
+def test_opting_in_turns_it_on_without_touching_the_shared_folder(tmp_path):
+    root = _configure(tmp_path, opted_in=False,
+                      discord_webhook="https://discord.com/api/webhooks/1/a")
+    before = (root / notify.CONFIG_NAME).read_text(encoding="utf-8")
+
+    notify.set_machine_opt_in(root, True)
+
+    assert notify.is_enabled_for(root, "publish") is True
+    assert (root / notify.CONFIG_NAME).read_text(encoding="utf-8") == before, (
+        "consent is this machine's business - the shared folder is unchanged"
+    )
+
+
+def test_setting_the_webhook_up_is_itself_consent(tmp_path):
+    # Nobody configures a channel and then wants to be asked whether they
+    # meant it.
+    notify.save_config(tmp_path, {"discord_webhook": "https://discord.com/api/webhooks/1/a"})
+    assert notify.is_enabled_for(tmp_path, "publish") is True
+
+
+def test_opting_out_leaves_the_channel_configured_for_everyone_else(tmp_path):
+    root = _configure(tmp_path, discord_webhook="https://discord.com/api/webhooks/1/a")
+    notify.set_machine_opt_in(root, False)
+
+    assert notify.is_enabled_for(root, "publish") is False
+    assert notify.webhook_url(root), "your partner's channel is still set up"
 
 
 def test_a_corrupt_config_is_treated_as_absent(tmp_path):
