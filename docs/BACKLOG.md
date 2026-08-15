@@ -43,8 +43,16 @@ preference, and preferences belong in conversation, not on a list.
 
 ### Blocking
 
-*(All previously blocking questions were answered on 2026-08-11 and moved
-into Queued or Decided. Nothing is blocking right now.)*
+Two small things only Travis can do, both on GitHub rather than in code:
+
+- **Tag a release when the collaborators should move builds.**
+  `git tag v0.1.3 && git push origin v0.1.3`. `v0.1.2` predates track
+  colours, the specific DAW-unavailable messages and the notification
+  wording. Nothing is broken in v0.1.2; it is just behind.
+- **Add the collaborators under Settings > Collaborators.** The repo is
+  private, so a release download 404s for anyone not on that list. This
+  is the last thing standing between the project and being used by
+  everyone.
 
 
 ### Proposed - awaiting triage
@@ -260,7 +268,15 @@ rejects the command.
 
 ## Queued work
 
-0. **Reaper should use local copies of the audio, not the Dropbox files.**
+0. **Finish the more-than-two-people wording** *(dawbridge-build)*. The
+   user-visible strings and `docs/` are done. About 30 instances of
+   "your partner" / "both of you" / "two people" remain in `sync.py`,
+   both backends, `conflicts.py`, `model.py` and `color.py` - mostly
+   comments, but the sample-rate warning a user actually reads still says
+   "your partner's next push". Prose only, no behaviour change. Started
+   2026-08-11, cut off by an API session limit before any edit.
+
+0b. **Reaper should use local copies of the audio, not the Dropbox files.**
    *Approved 2026-08-11.* Pro Tools already copies audio into its own
    session folder; Reaper references the shared Dropbox path directly. So a
    Reaper project breaks if the folder moves or goes offline, Reaper writes
