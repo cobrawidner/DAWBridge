@@ -51,6 +51,10 @@ The buttons sit left to right in the order you use them.
    take a while.
 2. **Open your DAW** and open the song you're working on. DAWBridge talks to
    whatever project is currently open, so make sure it's the right one.
+
+   Joining a project for the first time? Then there's nothing to open yet —
+   start a new empty project and pull into that. DAWBridge will ask you to
+   save it first; see below.
 3. **Run `DAWBridge.exe`.**
 4. Click **Browse…** and select the shared folder — the one ending in
    `.dawbridge`.
@@ -83,6 +87,37 @@ first.
 Tell everyone when you've published. DAWBridge will *catch* the case
 where two of you publish at once, but a message is faster than a warning — and
 if a Discord channel is set up (below), that message sends itself.
+
+---
+
+## Your first pull, and where the audio lives
+
+The first time you pull into a brand new project, DAWBridge asks you to save
+it. It suggests somewhere sensible — `Documents\DAWBridge\<project name>` —
+and you can put it anywhere you like except inside the shared folder.
+
+It asks because **your DAW keeps its own copy of the audio, in a folder
+beside the project.** That matters for three reasons:
+
+- Your project keeps working if the shared folder is moved, renamed,
+  unshared, or simply offline.
+- Your DAW isn't playing files out of a folder Dropbox is syncing
+  underneath it.
+- Your DAW's waveform and peak files stay on your machine instead of being
+  written into the shared folder, where they'd sync to everyone.
+
+To be clear about what this is *not*: audio read from Dropbox isn't damaged
+or lower quality — the file is identical either way. This is about the file
+staying put and staying available.
+
+You can click **Not now**. The pull still works and everything plays; the
+clips just read from the shared folder, and you'll get a warning in the log
+saying so. Save the project later and pull again, and the audio moves across
+on its own.
+
+Pro Tools has always worked this way — a Pro Tools session can't exist
+unsaved, and it already keeps its audio in its own `Audio Files` folder — so
+you'll only ever see this in Reaper.
 
 ---
 

@@ -15,7 +15,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import checks, notify, syncstate, theme
+from . import checks, localmedia, notify, syncstate, theme
 from .backend import Backend
 from .model import Session
 from .store import SharedSessionMoved, SharedStore
@@ -937,6 +937,8 @@ class DawBridgeGUI(ttk.Frame):
             self.master.after(0, lambda: self._log("[pull] cancelled - nothing was changed."))
             return
 
+        self._offer_to_save_project(backend, folder)
+
         warnings = backend.apply(session, store)
         syncstate.record_sync(folder, daw, session.revision, "load", project)
         self.master.after(0, lambda: self._log(f"[pull] loaded session revision {session.revision} into {daw}."))
@@ -946,6 +948,132 @@ class DawBridgeGUI(ttk.Frame):
         self._notify(folder, "load", notify.describe_load(
             who=short_name(self.name_var.get()), daw=daw, revision=session.revision,
             project=notify.project_name(folder)))
+
+    def _offer_to_save_project(self, backend, folder: Path) -> None:
+        """Get the DAW's project onto disk before its audio arrives.
+
+        The first pull of a project is usually into an empty, never-saved
+        one - that is what "start collaborating" looks like. An unsaved
+        project has no folder, and with no folder there is nowhere local
+        to put the audio, so every clip would play from Dropbox forever
+        (see localmedia for why that's worth avoiding). Asking here, once,
+        is the difference between a project that owns its media and one
+        that quietly depends on a cloud folder staying put.
+
+        Only backends that can be unsaved are asked. Pro Tools sessions
+        always have a path - you cannot create one without choosing where
+        it goes - so this is a capability probe rather than a check for
+        which DAW is selected.
+
+        Every failure is a log line, never an exception: declining, a
+        refused save, a read-only disk. `apply()` warns about the
+        consequence, the pull still happens, and nothing is lost.
+        """
+        probe = getattr(backend, "project_file", None)
+        saver = getattr(backend, "save_project_as", None)
+        if probe is None or saver is None:
+            return
+        try:
+            if probe():
+                return  # already saved; its folder is the media home
+        except Exception as exc:  # noqa: BLE001 - never block a pull over this
+            self.master.after(0, lambda exc=exc: self._log(
+                f"[pull] could not tell whether the project is saved ({exc}); continuing."))
+            return
+
+        suggested = localmedia.default_project_file(
+            notify.project_name(folder),
+            extension=getattr(backend, "project_extension", ".rpp"),
+        )
+        chosen = self._ask_on_main_thread(
+            lambda: self._prompt_save_project(suggested), default=None)
+        if not chosen:
+            self.master.after(0, lambda: self._log(
+                "[pull] project not saved - its audio will play from the shared folder."))
+            return
+
+        try:
+            landed = saver(chosen)
+        except Exception as exc:  # noqa: BLE001 - reported, never raised at the user
+            self.master.after(0, lambda exc=exc: self._log(f"[pull][warning] {exc}"))
+            return
+        self.master.after(0, lambda: self._log(f"[pull] project saved to {landed}"))
+        self.master.after(0, lambda: self._log(
+            f"[pull] audio will be copied to {localmedia.describe_media_home(landed)}"))
+
+    def _prompt_save_project(self, suggested: Path):
+        """Ask where to save the project. Returns a path, or None to skip.
+
+        Runs on the Tk main thread (see _ask_on_main_thread). Offers a
+        filled-in default rather than only a file browser, because the
+        person seeing this is mid-pull and does not want to make a
+        filing decision - they want the thing to work. The browser is
+        there for the one who does care.
+        """
+        result: dict = {}
+
+        win = tk.Toplevel(self.master)
+        win.title("DAWBridge - save this project first")
+        win.configure(background=theme.CHASSIS)
+        win.transient(self.master)
+        win.resizable(False, False)
+        win.grab_set()
+
+        body = ttk.Frame(win, style="Chassis.TFrame", padding=(16, 14, 16, 16))
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+
+        ttk.Label(body, wraplength=600, justify="left", text=(
+            "This project hasn't been saved yet.\n\n"
+            "Save it now and DAWBridge keeps its own copy of the audio right "
+            "beside it, so the project keeps working even if the shared folder "
+            "moves or goes offline - and your DAW stops playing files out of a "
+            "folder Dropbox is syncing underneath it.\n\n"
+            "Skip this and the clips play straight from the shared folder."
+        )).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
+
+        ttk.Label(body, text=theme.tracked("Save to"), style="Legend.TLabel").grid(
+            row=1, column=0, sticky="w", padx=(0, 14), pady=6)
+        path_var = tk.StringVar(value=str(suggested))
+        # Wide enough to show a default path whole. A clipped path is a
+        # decision made blind - the point of offering one is that the
+        # person can see where their project is about to go.
+        entry = ttk.Entry(body, textvariable=path_var, width=62)
+        entry.grid(row=1, column=1, sticky="ew", pady=6)
+
+        def browse() -> None:
+            picked = filedialog.asksaveasfilename(
+                parent=win,
+                title="Save the project as",
+                initialfile=suggested.name,
+                initialdir=str(suggested.parent),
+                defaultextension=suggested.suffix,
+                filetypes=[("Reaper project", f"*{suggested.suffix}"), ("All files", "*.*")],
+            )
+            if picked:
+                path_var.set(picked)
+
+        ttk.Button(body, text="Browse...", command=browse).grid(
+            row=1, column=2, sticky="w", padx=(8, 0), pady=6)
+
+        def save() -> None:
+            chosen = path_var.get().strip()
+            if chosen:
+                result["path"] = chosen
+            win.destroy()
+
+        def skip() -> None:
+            win.destroy()
+
+        row = ttk.Frame(body, style="Chassis.TFrame")
+        row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        ttk.Button(row, text="Save project", command=save).pack(side="left")
+        ttk.Button(row, text="Not now", command=skip).pack(side="left", padx=(8, 0))
+        entry.focus_set()
+
+        win.protocol("WM_DELETE_WINDOW", skip)
+        self.master.wait_window(win)
+        return result.get("path")
 
     def _ask_confirm_on_main_thread(self, preview, daw: str) -> bool:
         """Ask for confirmation from a worker thread, safely.
@@ -963,11 +1091,11 @@ class DawBridgeGUI(ttk.Frame):
     def _ask_confirm_on_main_thread_generic(self, title: str, message: str) -> bool:
         return self._ask_on_main_thread(lambda: messagebox.askyesno(title, message))
 
-    def _ask_on_main_thread(self, question) -> bool:
+    def _ask_on_main_thread(self, question, default=False):
         answer: queue.Queue = queue.Queue(maxsize=1)
 
         def ask() -> None:
-            result = False
+            result = default
             try:
                 result = question()
             except Exception as exc:  # noqa: BLE001 - surfaced to the log below

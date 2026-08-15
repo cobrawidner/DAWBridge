@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import color
+from . import color, localmedia
 from .model import Clip, Marker, Session, Track
 
 
@@ -1016,11 +1016,25 @@ def should_reimport_audio(live_source_path: str, clip: Clip, store) -> bool:
     push points straight at it and costs one string compare. Only a clip
     pointing somewhere else gets re-imported (and import_audio_file dedupes
     by hash, so re-importing something already known is a no-op).
+
+    A *local working copy* counts as the same audio. Both backends now
+    keep their media beside the project rather than in the shared folder
+    (see localmedia), so the path compare alone would call every clip
+    changed and re-hash every stem on every publish - correct, but it
+    reads a 90MB file per clip to conclude nothing happened. The store
+    names files after their own content hash, so a local file still
+    carrying that name still holds that content; `is_managed_copy_of`
+    checks the name really is one the store minted, which is what makes
+    the shortcut a content claim rather than a guess. A file the user
+    renamed, or one Pro Tools sliced to a clip's own boundaries, fails
+    that test and gets re-imported exactly as before.
     """
     if store is None or not live_source_path:
         return False
     if not clip.audio_file:
         return True
+    if localmedia.is_managed_copy_of(live_source_path, clip.audio_file):
+        return False
     try:
         return Path(live_source_path).resolve() != Path(store.resolve_audio_path(clip.audio_file)).resolve()
     except OSError:

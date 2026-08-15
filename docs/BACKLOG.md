@@ -279,6 +279,11 @@ rejects the command.
    2026-08-11, cut off by an API session limit before any edit.
 
 0b. **Reaper should use local copies of the audio, not the Dropbox files.**
+   — **LANDED 2026-08-15**, together with a save prompt on the first pull
+   into an unsaved project: the two are one feature, because an unsaved
+   project has no folder to put the audio in. See `localmedia.py`.
+   Not yet run against a live Reaper.
+
    *Approved 2026-08-11.* Pro Tools already copies audio into its own
    session folder; Reaper references the shared Dropbox path directly. So a
    Reaper project breaks if the folder moves or goes offline, Reaper writes

@@ -61,7 +61,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import color
+from . import color, localmedia
 from .backend import Backend, LiveClip, LiveMarker, LiveTrack, missing_client_library_reason
 from .model import Clip, Marker, Session, Track, new_id
 from .sync import (
@@ -342,6 +342,11 @@ def _reaper_web_interface_answers(reapy) -> bool:
 class ReaperBackend(Backend):
     name = "reaper"
 
+    #: What a saved project is called here, for callers offering a
+    #: filename. Pro Tools has no equivalent because a Pro Tools session
+    #: cannot exist unsaved.
+    project_extension = ".rpp"
+
     def is_available(self) -> bool:
         return self.unavailable_reason() is None
 
@@ -407,6 +412,47 @@ class ReaperBackend(Backend):
             return RPR.EnumProjects(-1, "", 4096)[2] or ""
         except Exception:
             return ""
+
+    def project_file(self) -> str:
+        """Where this project is saved, or "" if it never has been.
+
+        Same call as `project_identity`, named for the other thing that
+        answer is used for. Identity asks "is this the same project as
+        last time"; this asks "is there a folder to put audio in", and a
+        reader shouldn't have to know those are the same question.
+        """
+        return self.project_identity()
+
+    def save_project_as(self, path) -> str:
+        """Save the open project to `path`. Returns where it actually landed.
+
+        Verifies by reading the path back rather than trusting the call.
+        `Main_SaveProjectEx` is a relatively recent ReaScript addition and
+        reapy passes arguments through by position, so a version mismatch
+        would fail quietly - and the caller is about to copy gigabytes of
+        audio next to wherever this claims the project is. A silent
+        no-save would scatter that beside the *old* location, or nowhere.
+        """
+        from reapy import reascript_api as RPR
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            RPR.Main_SaveProjectEx(0, str(path), 0)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Reaper would not save the project to {path} ({exc}). Save it yourself in "
+                f"Reaper (File -> Save project as...), then pull again."
+            ) from exc
+
+        landed = self.project_file()
+        if not landed:
+            raise RuntimeError(
+                f"Reaper reported no project file after being asked to save to {path}, so the "
+                f"save did not happen. Save it yourself in Reaper (File -> Save project as...), "
+                f"then pull again."
+            )
+        return landed
 
     # ---- read: what's in Reaper right now ------------------------------
 
@@ -923,6 +969,20 @@ class ReaperBackend(Backend):
 
         warnings: list[str] = []
 
+        # Empty means this project has never been saved, so there is no
+        # folder to keep audio beside and the clips have to play from the
+        # shared folder. The GUI and CLI both offer to save first, so
+        # reaching here unsaved means the user declined - which is their
+        # call, but they should be told what they get.
+        project_file = self.project_file()
+        if not project_file:
+            warnings.append(
+                "this Reaper project has never been saved, so its audio plays straight from the "
+                "shared folder: the project breaks if that folder moves or goes offline, and "
+                "Reaper writes its peak files into it. Save the project and pull again to move "
+                "the audio alongside it"
+            )
+
         # Apply session tempo, but never silently flatten a tempo MAP:
         # canonical only models one tempo, so a project with multiple
         # tempo/time-sig markers would lose them. Leave those alone and
@@ -987,7 +1047,7 @@ class ReaperBackend(Backend):
             native_track.is_muted = track.muted
             _write_track_colour(RPR, native_track.id, track.color)
             local_tag_to_track[track.id] = native_track
-            self._push_clips(native_track, track, store, warnings)
+            self._push_clips(native_track, track, store, warnings, project_file)
 
         for track, _native_name in track_plan.to_update:
             native_track = local_tag_to_track[track.id]
@@ -1001,7 +1061,7 @@ class ReaperBackend(Backend):
             # colour a track already has is a cost with no effect.
             if not color.same(track.color, _read_track_colour(RPR, native_track.id)):
                 _write_track_colour(RPR, native_track.id, track.color)
-            self._push_clips(native_track, track, store, warnings)
+            self._push_clips(native_track, track, store, warnings, project_file)
 
         try:
             self._push_markers(session, warnings)
@@ -1024,7 +1084,36 @@ class ReaperBackend(Backend):
 
         return warnings
 
-    def _push_clips(self, native_track, track: Track, store, warnings: list[str]) -> None:
+    def _local_audio_path(self, project_file: str, store, clip: Clip, track_name: str,
+                          warnings: list[str]) -> Path | None:
+        """Where Reaper should read this clip's audio from.
+
+        A copy beside the project, so the DAW never streams from - or
+        writes peak files into - the shared cloud folder. See localmedia
+        for why that matters and, just as importantly, why it is *not*
+        about audio quality.
+
+        Falls back to the shared path rather than skipping the clip when
+        the copy can't be made. An arrangement playing from Dropbox is
+        the old behaviour and it works; an arrangement missing a clip is
+        a hole the user has to notice and repair by hand. The warning is
+        what makes the fallback honest.
+        """
+        shared = store.resolve_audio_path(clip.audio_file)
+        if not project_file:
+            return shared
+        try:
+            return localmedia.local_copy(project_file, store, clip.audio_file)
+        except OSError as exc:
+            warnings.append(
+                f"clip {clip.name!r} on track {track_name!r} could not be copied to this "
+                f"project's {localmedia.MEDIA_DIR_NAME} folder ({exc}); it plays from the shared "
+                f"folder instead, so it will stop working if that folder goes offline"
+            )
+            return shared
+
+    def _push_clips(self, native_track, track: Track, store, warnings: list[str],
+                    project_file: str = "") -> None:
         from reapy import reascript_api as RPR
 
         local_clip_ids = set()
@@ -1053,7 +1142,7 @@ class ReaperBackend(Backend):
                 warnings.append(missing + " (not created in Reaper)")
                 continue
 
-            audio_path = store.resolve_audio_path(clip.audio_file)
+            audio_path = self._local_audio_path(project_file, store, clip, track.name, warnings)
             item_id = RPR.AddMediaItemToTrack(native_track.id)
             take_id = RPR.AddTakeToMediaItem(item_id)
             source = RPR.PCM_Source_CreateFromFile(str(audio_path))
@@ -1080,7 +1169,14 @@ class ReaperBackend(Backend):
             # Reaper happily kept playing the old mono file, reporting
             # "no changes" the whole time.
             if take is not None and clip.audio_file:
-                wanted = store.resolve_audio_path(clip.audio_file)
+                # Resolving to the local copy here is also what migrates a
+                # project made before local copies existed: its takes
+                # point into the shared folder, which differs from
+                # `wanted`, so they get re-pointed on the next pull with
+                # nothing special written for the purpose. `local_copy`
+                # stats before it copies, so a clip already local costs
+                # one `exists()`.
+                wanted = self._local_audio_path(project_file, store, clip, track.name, warnings)
                 if _take_source_path(RPR, take) != str(wanted) and wanted.exists():
                     source = RPR.PCM_Source_CreateFromFile(str(wanted))
                     RPR.SetMediaItemTake_Source(take.id, source)
