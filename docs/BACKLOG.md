@@ -130,7 +130,7 @@ PTSL commands (DAWBridge calls 19) and 727 ReaScript functions reachable
 through reapy. Each says what exists, what we don't call, and what it would
 buy two people who mostly want to know what the other did.*
 
-**8. Keep a copy of each bridge id somewhere the user can't edit it.**
+**8. Keep a copy of each bridge id somewhere the user can't edit it.** — **LANDED 2026-08-11.**
 *What.* Alongside the id in the name, write it to Reaper's per-object extended
 state (`P_EXT:` on tracks and items) and fall back to it when a name has lost
 its tag.
@@ -148,7 +148,9 @@ name and ext state disagree.
 "identity lives in DAW-native names" - Pro Tools has no equivalent, so names
 stay the cross-DAW mechanism. This is a Reaper-side safety net under it.
 
-**9. Track colours.**
+**9. Track colours.** — **LANDED 2026-08-11.** Shipped in `color.py`; see
+Verified live below. Pro Tools snaps to its 69-colour palette, which the user
+accepted ("we can live with colors not being exact").
 *What.* Carry a track's colour across the bridge.
 *Why.* Colour is how musicians say "these four are the drums". It is the
 cheapest possible answer to "what did they do", and it needs no explaining to
