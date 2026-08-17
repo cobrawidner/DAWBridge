@@ -26,6 +26,12 @@ sys.path.insert(0, str(ROOT))
 from dawbridge import theme  # noqa: E402  (needs ROOT on the path first)
 
 ICON = ROOT / "assets" / "dawbridge.ico"
+
+# Built separately by tools/build_reaper_runtime.py, and not in git - it
+# is ~10MB of third-party binaries. Name kept in step with
+# dawbridge.reapersetup.RUNTIME_ASSET, which is what looks for it at run
+# time.
+REAPER_RUNTIME = "reaper_runtime.zip"
 # What Windows actually asks for. 16 is the taskbar and the title bar,
 # and it is the only one that decides whether a mark works.
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -96,6 +102,18 @@ def main() -> int:
         "--add-data", f"{ICON}{separator}assets",
         str(ROOT / "run_gui.py"),
     ]
+
+    # The interpreter Reaper loads. Without it the .exe still runs and
+    # Pro Tools still works, but a Reaper collaborator is back to
+    # installing Python by hand - which is the thing this removes. Warn
+    # loudly rather than shipping a build that quietly lost the feature.
+    runtime = ROOT / "assets" / REAPER_RUNTIME
+    if runtime.exists():
+        cmd.insert(-1, "--add-data")
+        cmd.insert(-1, f"{runtime}{separator}assets")
+    else:
+        print(f"WARNING: {runtime} is missing, so this build cannot set Reaper up on its own.")
+        print("         Build it first: python tools/build_reaper_runtime.py")
     print(" ".join(cmd))
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode == 0:

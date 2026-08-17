@@ -15,7 +15,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import checks, localmedia, notify, syncstate, theme
+from . import checks, localmedia, notify, reapersetup, syncstate, theme
 from .backend import Backend
 from .model import Session
 from .store import SharedSessionMoved, SharedStore
@@ -195,13 +195,25 @@ class DawBridgeGUI(ttk.Frame):
         # dark pips in two dark wells, the unselected one read as the
         # filled one. Which DAW is about to be written into is the one
         # thing here that must be unmistakable from across the room.
-        switch = theme.Segmented(body)
-        switch.grid(row=1, column=1, columnspan=2, sticky="w", pady=6)
+        # Switch and setup button share one cell, packed left. Given a
+        # column each, the button's width would set column 2 and drag
+        # "Browse..." away from the folder field above it - the same trap
+        # the name hint below falls into.
+        daw_row = ttk.Frame(body, style="Chassis.TFrame")
+        daw_row.grid(row=1, column=1, columnspan=2, sticky="w", pady=6)
+        switch = theme.Segmented(daw_row)
+        switch.pack(side="left")
         for label, value in (("Reaper", "reaper"), ("Pro Tools", "protools")):
             switch.add(ttk.Radiobutton(
                 switch, text=label, value=value, variable=self.daw_var,
                 style="Selector.TRadiobutton", takefocus=True,
             ))
+        # Next to the DAW switch rather than in the button row below,
+        # because it is about reaching the DAW, not about the bridge -
+        # and because that row is already at the width the window is
+        # sized for.
+        ttk.Button(daw_row, text="Set up Reaper...",
+                   command=self._on_setup_reaper).pack(side="left", padx=(12, 0))
 
         ttk.Label(body, text=theme.tracked("Your name"), style="Legend.TLabel").grid(
             row=2, column=0, sticky="w", padx=(0, 14), pady=6
@@ -531,6 +543,111 @@ class DawBridgeGUI(ttk.Frame):
         ttk.Button(row, text="Turn off", command=turn_off).pack(side="left")
         ttk.Button(row, text="Close", command=win.destroy).pack(side="left", padx=(8, 0))
         entry.focus_set()
+
+    def _on_setup_reaper(self) -> None:
+        """Teach Reaper to talk to DAWBridge, without anyone installing Python.
+
+        This replaces the single worst step in the whole product: a
+        collaborator got DAWBridge working and reported that installing
+        the right Python to get there was miserable. See
+        reapersetup for what was actually required and why bundling
+        reapy into the .exe never fixed it.
+
+        Deliberately its own window rather than a chain of message boxes.
+        Setup can only run with Reaper closed, and that condition needs
+        somewhere to be stated, checked, and re-checked after the person
+        goes and closes it - three message boxes in a row would just be
+        clicked through.
+        """
+        win = tk.Toplevel(self.master)
+        win.title("DAWBridge - set up Reaper")
+        win.configure(background=theme.CHASSIS)
+        win.transient(self.master)
+        win.resizable(False, False)
+
+        body = ttk.Frame(win, style="Chassis.TFrame", padding=(16, 14, 16, 16))
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
+
+        ttk.Label(body, wraplength=560, justify="left", text=(
+            "Reaper needs a one-time setup before DAWBridge can talk to it. "
+            "Pro Tools doesn't - if that's your DAW, you can close this.\n\n"
+            "DAWBridge carries its own copy of Python for Reaper to use, so "
+            "there is nothing for you to download or install. Nothing is added "
+            "to your system and no Python already on this machine is touched.\n\n"
+            "Reaper must be CLOSED. It rewrites its settings when it quits, "
+            "which would undo this."
+        )).grid(row=0, column=0, sticky="w", pady=(0, 12))
+
+        bezel = theme.Recess(body)
+        bezel.grid(row=1, column=0, sticky="ew")
+        status = tk.Label(bezel.well, background=theme.DISPLAY, foreground=theme.READOUT_INK,
+                          font=theme.FONTS["mono_small"], anchor="w", justify="left",
+                          wraplength=560, padx=10, pady=8)
+        bezel.mount(status)
+
+        def say(text: str, colour: str = theme.READOUT_INK) -> None:
+            status.configure(text=text, foreground=colour)
+
+        def check() -> None:
+            resource = reapersetup.resource_dir()
+            lines = reapersetup.describe_state(resource, reapersetup.runtime_root())
+            running = reapersetup.reaper_is_running()
+            if running:
+                lines.append("Reaper is OPEN - close it before setting up.")
+            elif running is None:
+                lines.append("Couldn't tell whether Reaper is open; make sure it's closed.")
+            else:
+                lines.append("Reaper is closed. Ready.")
+            say("\n".join(lines),
+                theme.READOUT_WARN if running else theme.READOUT_INK)
+
+        def run_setup() -> None:
+            # Re-checked here, not just displayed above: the person has
+            # had the dialog open while going to close Reaper, so the
+            # reading from a moment ago is exactly the stale one.
+            if reapersetup.reaper_is_running():
+                say("Reaper is still open. Close it, then press Set up Reaper again.",
+                    theme.READOUT_WARN)
+                return
+
+            resource = reapersetup.resource_dir()
+            if resource is None:
+                say("Couldn't find Reaper's settings folder. Is Reaper installed for this "
+                    "user account? A portable Reaper install has to be set up by hand.",
+                    theme.READOUT_CRIT)
+                return
+
+            archive = theme.asset_path(reapersetup.RUNTIME_ASSET)
+            if archive is None:
+                say("This build of DAWBridge doesn't include the Reaper runtime, so it "
+                    "can't set Reaper up on its own. Please report this.", theme.READOUT_CRIT)
+                return
+
+            say("Working...")
+            win.update_idletasks()
+            try:
+                runtime = reapersetup.runtime_root()
+                dll = reapersetup.unpack_runtime(Path(archive), runtime)
+                steps = reapersetup.configure(resource, dll,
+                                              reapersetup.server_script(runtime))
+            except Exception as exc:  # noqa: BLE001 - surfaced, never raised at the user
+                say(f"Setup failed: {exc}", theme.READOUT_CRIT)
+                self._log(f"[setup] failed: {exc}")
+                return
+
+            for step in steps:
+                self._log(f"[setup] {step}")
+            say("Done. Start Reaper now - it will pick this up when it opens. "
+                "Then come back and press Refresh status.", theme.READOUT_GOOD)
+
+        row = ttk.Frame(body, style="Chassis.TFrame")
+        row.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        ttk.Button(row, text="Set up Reaper", command=run_setup).pack(side="left")
+        ttk.Button(row, text="Check again", command=check).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="Close", command=win.destroy).pack(side="left", padx=(8, 0))
+
+        check()
 
     def _describe_plan(self, plan) -> list[str]:
         """What this publish is about to do to the shared session."""

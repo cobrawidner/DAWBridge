@@ -2,6 +2,12 @@
 # minute - it belongs in a release, not in history.
 build/
 dist/
+
+# The Python interpreter shipped for Reaper to load: ~10MB of python.org
+# binaries plus reapy. Rebuilt from a pinned, versioned URL in seconds by
+# tools/build_reaper_runtime.py, so git would be carrying it forever for
+# nothing.
+assets/reaper_runtime.zip
 *.spec
 *.egg-info/
 

@@ -73,15 +73,39 @@ it as "whoever's turn it is runs pull, then push."
 
 ## Setup
 
-### Reaper machine
+### If you're using the .exe (what collaborators should do)
+
+Download `DAWBridge.exe` from the Releases page and run it. Nothing to
+install, Python included.
+
+**Reaper:** close Reaper, press **Set up Reaper...**, then start Reaper
+again. That's it.
+
+DAWBridge carries its own copy of Python for Reaper to load, because reapy
+is a client/server pair: the client ships in the .exe, but the server half
+is a ReaScript that runs *inside* Reaper on an interpreter Reaper loads
+itself. That used to mean every collaborator had to install a Python of a
+version Reaper would accept before anything worked at all. It now unpacks
+to `%LOCALAPPDATA%\DAWBridge\reaper-python`, nothing goes on PATH, no
+Python already on the machine is touched, and deleting that folder undoes
+it.
+
+Reaper must be closed during setup — it rewrites `reaper.ini` from memory
+when it quits, which would silently undo the whole thing.
+
+**Pro Tools:** nothing to set up. PTSL is gRPC over a socket, so no code
+runs inside Pro Tools. You do need to accept Avid's Scripting SDK licence
+(below) and have scripting enabled in Pro Tools.
+
+### If you're working from source
+
 ```bash
+# Reaper machine
 pip install python-reapy
 python -c "import reapy; reapy.configure_reaper()"
 # restart Reaper
-```
 
-### Pro Tools machine
-```bash
+# Pro Tools machine
 pip install py-ptsl
 ```
 You'll also need to accept Avid's Pro Tools Scripting SDK license at
@@ -94,6 +118,20 @@ has moved around between versions).
 cd dawbridge
 pip install -e .
 ```
+
+### Building the .exe
+
+```bash
+python tools/build_reaper_runtime.py   # once; downloads ~10MB from python.org
+python tools/build_exe.py
+```
+
+The first step produces `assets/reaper_runtime.zip`, the interpreter Reaper
+loads. It isn't in git — it's third-party binaries that rebuild from a
+pinned URL in seconds. `build_exe.py` warns rather than fails without it, so
+a build that skipped it still runs and still syncs Pro Tools; it just can't
+set Reaper up on its own. CI checks the finished exe's size to catch exactly
+that.
 
 ## Status of this code
 

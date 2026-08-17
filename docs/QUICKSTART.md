@@ -55,7 +55,18 @@ The buttons sit left to right in the order you use them.
    Joining a project for the first time? Then there's nothing to open yet —
    start a new empty project and pull into that. DAWBridge will ask you to
    save it first; see below.
-3. **Run `DAWBridge.exe`.**
+3. **Run `DAWBridge.exe`.** There's nothing to install — it's one file.
+
+   **Reaper users, one extra step, once.** Reaper needs to be taught to talk
+   to DAWBridge. **Close Reaper**, press **Set up Reaper...**, then open
+   Reaper again. You don't need to download or install anything; DAWBridge
+   brings its own copy of Python for Reaper to use, and nothing already on
+   your machine is changed.
+
+   Reaper has to be *closed* while this runs. It rewrites its settings when
+   it quits, so doing it with Reaper open just undoes the setup.
+
+   **Pro Tools users:** nothing to do here.
 4. Click **Browse…** and select the shared folder — the one ending in
    `.dawbridge`.
 5. Pick your DAW: **Reaper** or **Pro Tools**. The selected one is highlighted.

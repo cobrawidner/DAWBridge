@@ -270,6 +270,25 @@ rejects the command.
 
 ## Queued work
 
+00. **Verify the bundled Reaper runtime against a live Reaper.** *Blocking
+   the next release.* Shipped 2026-08-17: DAWBridge now carries python.org's
+   embeddable Python with reapy installed, unpacks it to
+   `%LOCALAPPDATA%\DAWBridge\reaper-python`, and writes the DLL path into
+   `reaper.ini` itself, so no collaborator installs Python. Triggered by a
+   collaborator getting it working and reporting that step as miserable.
+
+   Proven locally: the embedded interpreter runs and imports reapy; the zip
+   is really inside the .exe; `configure()` writes reascript/DLL path/web
+   interface/kb entry against a fake Reaper install and verifies them back.
+
+   **Not proven:** that Reaper itself loads this DLL. Reaper does
+   `LoadLibrary` + `Py_Initialize` rather than running `python.exe`, and
+   finds the stdlib through the `python310._pth` file sitting next to the
+   DLL. That's the documented behaviour and the layout is right, but it has
+   never been run. Needs: close Reaper, press **Set up Reaper...**, reopen,
+   check DAWBridge reaches it. Do this on a machine that does *not* already
+   have a working reapy setup, or the old one masks the result.
+
 0. **Finish the more-than-two-people wording** *(dawbridge-build)*. The
    user-visible strings and `docs/` are done. About 30 instances of
    "your partner" / "both of you" / "two people" remain in `sync.py`,

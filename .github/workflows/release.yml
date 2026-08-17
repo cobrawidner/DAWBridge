@@ -43,8 +43,29 @@ jobs:
         # runner before this workflow was ever triggered.
         run: python -m pytest -q
 
+      # The interpreter Reaper loads, downloaded from python.org and
+      # bundled into the exe. Without this step the build still succeeds
+      # and Pro Tools still works, but a Reaper collaborator is back to
+      # installing Python by hand - the one step that actually defeated
+      # someone. build_exe.py warns rather than failing if it's absent,
+      # so this must run first and must not be silently skipped.
+      - name: Build the bundled Reaper runtime
+        run: python tools/build_reaper_runtime.py
+
       - name: Build the exe
         run: python tools/build_exe.py
+
+      - name: Check the runtime really got bundled
+        # A missing runtime shows up as a warning in the build log, which
+        # nobody reads. Measured locally: ~14MB without the runtime, 23.8MB
+        # with it. Anything under 20MB means the bundle was silently
+        # dropped and the release would ship without the feature it was
+        # cut for.
+        shell: pwsh
+        run: |
+          $size = (Get-Item dist/DAWBridge.exe).Length
+          Write-Host "DAWBridge.exe is $([math]::Round($size/1MB,1)) MB"
+          if ($size -lt 20MB) { throw "exe is too small - the Reaper runtime was not bundled" }
 
       # Every run leaves a downloadable exe, including a manual one. The
       # Release step below only fires for a tag, so without this a

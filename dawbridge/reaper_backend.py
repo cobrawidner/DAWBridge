@@ -387,9 +387,9 @@ class ReaperBackend(Backend):
         if not _reaper_web_interface_answers(reapy):
             return (
                 "Reaper isn't answering on localhost:2307. Either it isn't running, or "
-                "it's running without the one-time reapy setup - DAWBridge can't tell "
-                "those apart. If Reaper is open, run: python -c \"import reapy; "
-                "reapy.configure_reaper()\" and restart Reaper."
+                "it hasn't been set up yet - DAWBridge can't tell those apart. If Reaper "
+                "is open, close it and press \"Set up Reaper...\"; DAWBridge brings its "
+                "own Python, so there is nothing to install."
             )
 
         try:
@@ -400,9 +400,9 @@ class ReaperBackend(Backend):
             return None
 
         return (
-            "Reaper is running, but its reapy bridge isn't answering - the scripting "
-            "connection, not Reaper itself, is what's missing. Run: python -c \"import "
-            "reapy; reapy.configure_reaper()\" and restart Reaper."
+            "Reaper is running, but its scripting bridge isn't answering - the connection, "
+            "not Reaper itself, is what's missing. Close Reaper, press \"Set up Reaper...\", "
+            "then start Reaper again."
         )
 
     def project_identity(self) -> str:
