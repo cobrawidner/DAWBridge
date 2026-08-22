@@ -16,6 +16,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import checks, localmedia, notify, reapersetup, syncstate, theme
+from .reaper_backend import NO_ANSWER, NO_SERVER, READY, bridge_server_state
 from .backend import Backend
 from .model import Session
 from .store import SharedSessionMoved, SharedStore
@@ -23,6 +24,17 @@ from . import sync
 from .sync import preview_push
 
 _CONFIG_PATH = Path.home() / ".dawbridge_gui.json"
+
+#: What to tell someone who has just restarted Reaper and wants to know
+#: whether the setup took. NO_SERVER is the state that used to freeze the
+#: whole app with no message at all - see reaper_backend.bridge_server_state.
+_BRIDGE_STATE_WORDS = {
+    READY: "Bridge: running. DAWBridge can reach Reaper.",
+    NO_SERVER: ("Bridge: NOT running. Reaper is up but its bridge script isn't "
+                "starting - close Reaper and set up again."),
+    NO_ANSWER: ("Bridge: no answer on port 2307. Reaper is running without its web "
+                "interface - set up again, then restart Reaper."),
+}
 
 
 def _unavailable(backend, daw: str) -> str | None:
@@ -594,7 +606,12 @@ class DawBridgeGUI(ttk.Frame):
             lines = reapersetup.describe_state(resource, reapersetup.runtime_root())
             running = reapersetup.reaper_is_running()
             if running:
-                lines.append("Reaper is OPEN - close it before setting up.")
+                # The one case worth reporting in detail: this is the
+                # moment after a restart when the only question is
+                # "did it work?" - and until now nothing in the app
+                # answered it.
+                lines.append(_BRIDGE_STATE_WORDS[bridge_server_state()])
+                lines.append("Reaper is OPEN - close it before setting up again.")
             elif running is None:
                 lines.append("Couldn't tell whether Reaper is open; make sure it's closed.")
             else:
