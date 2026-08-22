@@ -442,6 +442,61 @@ def bridge_server_state(port: int = 2307) -> str:
     return READY if body.rsplit(chr(9), 1)[-1].strip() else NO_SERVER
 
 
+#: How long to wait for Reaper to bring its bridge server up. It starts
+#: in well under a second when it works at all; this is only generous
+#: enough that a busy machine is not called broken.
+_ACTIVATION_SECONDS = 12
+
+
+def start_bridge_server(port: int = 2307) -> str:
+    """Ask Reaper to start reapy's bridge server. Returns the new state.
+
+    **An empty `server_port` is the NORMAL state after every Reaper
+    restart, not a fault.** reapy's design is that the first client to
+    connect triggers the `activate_reapy_server` action, which starts the
+    server and writes the port into ext state. Treating "no server yet"
+    as fatal - which an earlier version of this file did - breaks every
+    working setup on earth the moment Reaper is restarted, and reports it
+    as "Reaper isn't set up". That is precisely backwards.
+
+    What must NOT happen is reapy's version of this, which recurses
+    without a base case and hangs the app forever (see
+    bridge_server_state). So the same job is done here, bounded:
+
+      - fire the action once, never in a loop,
+      - do not depend on the HTTP response. Reaper often does not answer
+        that request until the script it launched settles, and on a
+        failed script it never answers at all. The response is not the
+        signal; the ext state is.
+      - poll for the port, and give up at a deadline.
+    """
+    import json
+    import time
+    from urllib.request import urlopen
+
+    base = f"http://{_LOOPBACK}:{port}/_/"
+    try:
+        with urlopen(base + "GET/EXTSTATE/reapy/activate_reapy_server",
+                     timeout=_WEB_INTERFACE_TIMEOUT_SECONDS) as answer:
+            raw = answer.read().decode("utf-8", "replace")
+        action = json.loads(raw.rsplit(chr(9), 1)[-1].strip())
+    except Exception:
+        return NO_ANSWER if bridge_server_state(port) == NO_ANSWER else NO_SERVER
+
+    try:
+        urlopen(base + str(action), timeout=_WEB_INTERFACE_TIMEOUT_SECONDS)
+    except Exception:
+        pass  # see above - the response is not the signal
+
+    deadline = time.monotonic() + _ACTIVATION_SECONDS
+    while time.monotonic() < deadline:
+        state = bridge_server_state(port)
+        if state != NO_SERVER:
+            return state
+        time.sleep(0.4)
+    return NO_SERVER
+
+
 def _reaper_web_interface_answers(reapy) -> bool:
     """Whether Reaper's ReaScript web interface responds on the loopback.
 
@@ -542,12 +597,16 @@ class ReaperBackend(Backend):
         # nothing after the import can rescue that.
         state = bridge_server_state()
         if state == NO_SERVER:
+            # Normal after a Reaper restart: the server is started on
+            # demand by the first client. Do that here, bounded, rather
+            # than letting reapy do it unbounded during its import.
+            state = start_bridge_server()
+        if state == NO_SERVER:
             return (
-                "Reaper is running and set up, but its DAWBridge bridge script isn't "
-                "starting - so Reaper never finishes answering, and DAWBridge won't try. "
-                "Close Reaper, press \"Set up Reaper...\" again, then reopen it. If it "
-                "keeps happening, Reaper is failing to load the bundled Python: check "
-                "Options > Preferences > Plug-ins > ReaScript in Reaper for an error."
+                "Reaper is running, but its bridge script did not start when asked. "
+                "In Reaper, check Options > Preferences > Plug-ins > ReaScript - the "
+                "Python it names there has to exist and have reapy installed. Nothing "
+                "was changed."
             )
 
         try:
