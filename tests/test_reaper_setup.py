@@ -343,3 +343,124 @@ def test_configure_repairs_before_adding_its_own_entry(tmp_path):
     entries = [l for l in body.splitlines() if l.startswith("SCR 4 0 ")]
     assert len(entries) == 3              # the two originals plus ours
     assert any("repaired" in s for s in steps)
+
+
+# ---- never take away a Python that already works ----------------------
+
+def _installed_python(tmp_path: Path, name: str = "python310.dll") -> Path:
+    """Stands in for a Python the user installed themselves."""
+    where = tmp_path / "SystemPython"
+    where.mkdir(exist_ok=True)
+    (where / name).write_text("dll")
+    return where
+
+
+def _reaper_with_python(tmp_path: Path, python_dir: Path) -> Path:
+    resource = tmp_path / "REAPER"
+    resource.mkdir(exist_ok=True)
+    (resource / "reaper.ini").write_text(
+        "[reaper]\ncsurf_cnt=0\nreascript=1\n"
+        f"pythonlibpath64={python_dir}\npythonlibdll64=python310.dll\n",
+        encoding="utf-8")
+    (resource / "reaper-kb.ini").write_text("", encoding="utf-8")
+    return resource
+
+
+def test_a_working_python_is_detected(tmp_path):
+    resource = _reaper_with_python(tmp_path, _installed_python(tmp_path))
+
+    found = reapersetup.existing_python(resource)
+
+    assert found is not None and found[1] == "python310.dll"
+
+
+def test_a_python_that_was_uninstalled_does_not_count(tmp_path):
+    """A path left behind by a Python that is no longer there is not
+    something worth preserving."""
+    resource = _reaper_with_python(tmp_path, tmp_path / "GoneAway")
+
+    assert reapersetup.existing_python(resource) is None
+
+
+@needs_reapy
+def test_configure_refuses_to_replace_a_working_python(tmp_path):
+    """The regression that broke a real machine. Reaper had a working
+    Python and reapy setup for months; setup overwrote pythonlibpath64
+    with the bundled interpreter and it stopped working. A convenience
+    that damages the people who never needed it is worse than no
+    convenience.
+    """
+    resource = _reaper_with_python(tmp_path, _installed_python(tmp_path))
+    runtime = tmp_path / "runtime"
+    reapersetup.unpack_runtime(_fake_runtime_zip(tmp_path), runtime)
+
+    with pytest.raises(reapersetup.PythonAlreadyWorking):
+        reapersetup.configure(resource, reapersetup.find_dll(runtime),
+                              reapersetup.server_script(runtime))
+
+    # And it really left it alone, rather than refusing after writing.
+    body = (resource / "reaper.ini").read_text(encoding="utf-8")
+    assert "SystemPython" in body
+    assert str(runtime) not in body
+
+
+@needs_reapy
+def test_a_machine_with_no_python_is_still_set_up(tmp_path):
+    """The case the bundled interpreter was actually built for."""
+    resource = tmp_path / "REAPER"
+    resource.mkdir()
+    (resource / "reaper.ini").write_text("[reaper]\ncsurf_cnt=0\n", encoding="utf-8")
+    (resource / "reaper-kb.ini").write_text("", encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    reapersetup.unpack_runtime(_fake_runtime_zip(tmp_path), runtime)
+
+    reapersetup.configure(resource, reapersetup.find_dll(runtime),
+                          reapersetup.server_script(runtime))
+
+    assert str(runtime) in (resource / "reaper.ini").read_text(encoding="utf-8")
+
+
+@needs_reapy
+def test_re_running_setup_on_its_own_runtime_is_fine(tmp_path, monkeypatch):
+    """Refusing must not lock DAWBridge out of the config it wrote
+    itself, or setup becomes a one-shot that can never be repeated."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    runtime = reapersetup.runtime_root()
+    reapersetup.unpack_runtime(_fake_runtime_zip(tmp_path), runtime)
+    resource = _reaper_with_python(tmp_path, runtime)
+
+    reapersetup.configure(resource, reapersetup.find_dll(runtime),
+                          reapersetup.server_script(runtime))  # must not raise
+
+
+@needs_reapy
+def test_the_user_can_still_override_deliberately(tmp_path):
+    resource = _reaper_with_python(tmp_path, _installed_python(tmp_path))
+    runtime = tmp_path / "runtime"
+    reapersetup.unpack_runtime(_fake_runtime_zip(tmp_path), runtime)
+
+    reapersetup.configure(resource, reapersetup.find_dll(runtime),
+                          reapersetup.server_script(runtime),
+                          replace_existing_python=True)
+
+    assert str(runtime) in (resource / "reaper.ini").read_text(encoding="utf-8")
+
+
+def test_an_existing_python_is_reported_as_nothing_to_do(tmp_path):
+    """The readout must say this BEFORE anything is pressed. Someone who
+    reads "Reaper isn't set up" will press the button that breaks them -
+    which is exactly how a working machine got broken.
+    """
+    resource = _reaper_with_python(tmp_path, _installed_python(tmp_path))
+
+    lines = chr(10).join(reapersetup.describe_state(resource, tmp_path / "nothing"))
+
+    assert "already uses its own" in lines
+    assert "will not replace a working Python" in lines
+
+
+def test_a_reaper_that_was_never_found_claims_nothing_about_its_python(tmp_path):
+    lines = chr(10).join(reapersetup.describe_state(None, tmp_path / "nothing"))
+
+    assert "wasn't found" in lines
+    assert "has none configured" not in lines

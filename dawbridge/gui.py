@@ -648,6 +648,15 @@ class DawBridgeGUI(ttk.Frame):
                 dll = reapersetup.unpack_runtime(Path(archive), runtime)
                 steps = reapersetup.configure(resource, dll,
                                               reapersetup.server_script(runtime))
+            except reapersetup.PythonAlreadyWorking as exc:
+                # Not a failure. Reaper already has a Python, so setup
+                # correctly did nothing - the bundled copy is for
+                # machines that have none. Saying "failed" here would
+                # push someone into forcing it, which is exactly the
+                # action that breaks a working install.
+                say(str(exc), theme.READOUT_INK)
+                self._log(f"[setup] left Reaper's existing Python alone: {exc.directory}")
+                return
             except Exception as exc:  # noqa: BLE001 - surfaced, never raised at the user
                 say(f"Setup failed: {exc}", theme.READOUT_CRIT)
                 self._log(f"[setup] failed: {exc}")

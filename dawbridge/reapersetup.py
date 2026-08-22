@@ -42,6 +42,7 @@ Three things here are non-negotiable, each learned from how this fails:
 """
 from __future__ import annotations
 
+import configparser
 import os
 import re
 import shutil
@@ -220,6 +221,51 @@ def repair_script_list(resource: Path) -> bool:
     return True
 
 
+def existing_python(resource: Path) -> tuple[str, str] | None:
+    """The Python Reaper is already configured to use, if it has one.
+
+    Returns (directory, dll name), or None when nothing usable is set.
+
+    **This is the guard that should have existed from the start.** The
+    bundled interpreter exists for people who have no Python, which was
+    the whole complaint. It was never meant for a machine that already
+    works - and on the first one it met, it overwrote a working
+    `pythonlibpath64` with its own, and broke a setup that had been fine
+    for months. Shipping a convenience that damages the people who
+    didn't need it is worse than not shipping it.
+
+    "Usable" means the DLL is really on disk. A path left behind by a
+    Python that has since been uninstalled is not something to preserve.
+    """
+    # configparser rather than reapy's Config, deliberately. This is a
+    # read, so it needs none of reapy's backup-and-write care - and
+    # importing reapy is itself hazardous while Reaper is up without its
+    # bridge (see reaper_backend.bridge_server_state). A guard that
+    # protects someone's working setup must not depend on the very thing
+    # that can hang. It also has to run before any reapy import, which
+    # settles the question.
+    parser = configparser.ConfigParser(strict=False, delimiters="=", interpolation=None)
+    parser.optionxform = str.lower
+    try:
+        parser.read(Path(resource) / "reaper.ini", encoding="utf-8")
+        section = parser["reaper"]
+        directory = str(section.get("pythonlibpath64", "")).strip()
+        dll = str(section.get("pythonlibdll64", "")).strip()
+    except Exception:
+        return None
+    if not directory or not dll:
+        return None
+    return (directory, dll) if (Path(directory) / dll).exists() else None
+
+
+def is_bundled(directory: str) -> bool:
+    """Whether a configured Python is one DAWBridge unpacked itself."""
+    try:
+        return Path(directory).resolve() == runtime_root().resolve()
+    except Exception:
+        return False
+
+
 def describe_state(resource: Path | None, runtime: Path) -> list[str]:
     """Plain-language lines about what is and isn't set up yet."""
     lines = []
@@ -227,12 +273,42 @@ def describe_state(resource: Path | None, runtime: Path) -> list[str]:
         lines.append("Reaper's settings folder wasn't found - is Reaper installed for this user?")
     else:
         lines.append(f"Reaper settings: {resource}")
-    lines.append("Bundled Python: unpacked" if is_unpacked(runtime) else
-                 "Bundled Python: not unpacked yet")
+    # Which Python Reaper will actually use matters more than whether
+    # ours is unpacked, and it is the difference between "setup will do
+    # something" and "setup will correctly do nothing".
+    if resource is None:
+        # Nothing true can be said about a Reaper that wasn't found.
+        lines.append("Bundled Python: unpacked" if is_unpacked(runtime)
+                     else "Bundled Python: not unpacked yet")
+        return lines
+
+    already = existing_python(resource)
+    if already and not is_bundled(already[0]):
+        lines.append(f"Python: Reaper already uses its own, at {already[0]}")
+        lines.append("Nothing to set up - DAWBridge will not replace a working Python.")
+    elif already:
+        lines.append("Python: Reaper is using the copy DAWBridge unpacked.")
+    else:
+        lines.append("Python: Reaper has none configured - DAWBridge will supply one.")
     return lines
 
 
-def configure(resource: Path, dll: Path, script: Path) -> list[str]:
+class PythonAlreadyWorking(RuntimeError):
+    """Reaper already has a Python. Refuse rather than replace it."""
+
+    def __init__(self, directory: str, dll: str):
+        self.directory, self.dll = directory, dll
+        super().__init__(
+            f"Reaper is already set up to use the Python at {directory}, so DAWBridge "
+            f"left it alone. Replacing a working Python is how a machine that was fine "
+            f"stops being fine. If Reaper genuinely isn't connecting, fix that setup, or "
+            f"clear the Python path in Reaper (Options > Preferences > Plug-ins > "
+            f"ReaScript) and set up again - DAWBridge will then use its own copy."
+        )
+
+
+def configure(resource: Path, dll: Path, script: Path,
+              replace_existing_python: bool = False) -> list[str]:
     """Point Reaper at the bundled interpreter and reapy's server script.
 
     Returns the steps taken, for the log. Raises with a sentence a
@@ -251,6 +327,14 @@ def configure(resource: Path, dll: Path, script: Path) -> list[str]:
 
     done = []
     ini = Path(resource) / "reaper.ini"
+
+    # Never take a working Python away from someone who already had one -
+    # see existing_python for what happened the one time this wasn't
+    # checked. The bundled copy is for machines with nothing, which was
+    # the entire point of building it.
+    already = existing_python(resource)
+    if already and not is_bundled(already[0]) and not replace_existing_python:
+        raise PythonAlreadyWorking(*already)
 
     config = Config(str(ini))
     config["reaper"]["reascript"] = "1"
