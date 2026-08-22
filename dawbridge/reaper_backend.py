@@ -306,8 +306,144 @@ def _take_source_path(RPR, take) -> str:
 _WEB_INTERFACE_TIMEOUT_SECONDS = 0.5
 
 
+#: Always the IPv4 literal, never the name "localhost". On Windows,
+#: `localhost` resolves to ::1 (IPv6) FIRST, and Reaper's web interface
+#: binds 0.0.0.0 - IPv4 only. Measured live: ::1:2307 takes 2.05s to
+#: refuse, 127.0.0.1:2307 connects in 0.01s. That wasted round trip is
+#: paid on every fresh connection, and reapy's `perform_action` opens one
+#: with NO timeout at all, so on a machine where the IPv6 SYN is dropped
+#: rather than refused it never returns - the app sits with every button
+#: greyed and no error, which is exactly how this was found.
+_LOOPBACK = "127.0.0.1"
+
+#: A last-resort ceiling for reapy calls that pass no timeout of their
+#: own (`WebInterface.perform_action`, `ExtState.__setitem__` - both plain
+#: `urlopen(url)`). Talking to the DAW over IPv4 loopback either answers
+#: immediately or fails immediately, so anything approaching this is
+#: already broken. Generous enough to never fire in normal use; the point
+#: is only that "frozen forever with no message" stops being reachable.
+_REAPY_CALL_CEILING_SECONDS = 15
+
+
+class _socket_timeout_floor:
+    """Impose a default socket timeout on code that sets none.
+
+    urllib falls back to `socket.getdefaulttimeout()` when a call passes
+    no timeout, which is how a third-party library's untimed `urlopen`
+    gets bounded without patching it. Restores the previous value, and
+    never lowers a stricter one already in force.
+    """
+
+    def __init__(self, seconds: float):
+        self.seconds = seconds
+        self.previous = None
+
+    def __enter__(self):
+        import socket
+
+        self.previous = socket.getdefaulttimeout()
+        if self.previous is None or self.previous > self.seconds:
+            socket.setdefaulttimeout(self.seconds)
+        return self
+
+    def __exit__(self, *exc):
+        import socket
+
+        socket.setdefaulttimeout(self.previous)
+        return False
+
+
+def use_ipv4_loopback(reapy) -> str | None:
+    """Point reapy at 127.0.0.1 instead of "localhost". Returns a problem, or None.
+
+    reapy hardcodes `host="localhost"` in both `Client` and
+    `WebInterface`, and resolves it fresh on every connection. See
+    _LOOPBACK for what that costs on Windows.
+
+    `reapy.connect(host)` is reapy's own supported way to choose which
+    machine to talk to - 127.0.0.1 is simply a host like any other - so
+    this is a configuration call, not a patch of library internals.
+
+    Idempotent: the selected host is read back first, so repeated calls
+    cost nothing. That matters because `connect` reloads
+    `reapy.reascript_api`, which is not free and would otherwise happen
+    on every status refresh.
+
+    One deliberate difference from reapy's own behaviour: `connect`
+    *raises* DisabledDistAPIError for any host other than "localhost",
+    where for localhost it only warns. Raising is the better answer and
+    it is caught here, so a failure to connect returns a sentence instead
+    of leaving a half-selected client behind.
+    """
+    try:
+        from reapy.tools.network import machines
+    except Exception as exc:  # noqa: BLE001 - an old reapy layout, not a crash
+        return f"could not select IPv4 loopback for Reaper ({exc})"
+
+    try:
+        if machines.get_selected_machine_host() == _LOOPBACK:
+            return None
+    except Exception:
+        pass  # no client selected yet, which is what we are about to fix
+
+    try:
+        with _socket_timeout_floor(_REAPY_CALL_CEILING_SECONDS):
+            reapy.connect(_LOOPBACK)
+    except Exception as exc:  # noqa: BLE001 - reported to the user, never raised
+        return (f"Reaper is not answering on {_LOOPBACK}:"
+                f"{getattr(getattr(reapy, 'config', None), 'WEB_INTERFACE_PORT', 2307)} ({exc})")
+    return None
+
+
+#: What the loopback probe found. Deliberately three states, not two:
+#: "Reaper answered but its bridge server is not running" has to be
+#: distinguishable from "nothing answered", because only the first one
+#: is a trap - see bridge_server_state.
+NO_ANSWER, NO_SERVER, READY = "no-answer", "no-server", "ready"
+
+
+def bridge_server_state(port: int = 2307) -> str:
+    """Ask Reaper directly, over plain HTTP, without importing reapy.
+
+    **This must run before `import reapy`, and that ordering is the whole
+    point of the function.** reapy connects at module-import time, and
+    its `WebInterface.get_reapy_server_port` does this:
+
+        except UndefinedExtStateError:
+            self.activate_reapy_server()
+            port = self.get_reapy_server_port()   # <- recurses
+
+    with no bound and no base case. When Reaper is running but its bridge
+    server never comes up, that recursion never terminates: each pass
+    fires the activate action inside Reaper again and waits on a
+    `urlopen` that passes no timeout. `import reapy` simply never
+    returns, the GUI worker thread blocks forever with every button
+    greyed, and there is no error anywhere. Observed exactly that -
+    a stream of fresh sockets to port 2307 and zero I/O.
+
+    No timeout DAWBridge sets can fix that, because it happens inside
+    the import. The only reliable defence is to find out first, with
+    urllib, and refuse to import reapy when the answer says it would
+    hang. Read-only throughout: a GET of an ext state key, never
+    `perform_action`, which would run something in the user's DAW just
+    for asking whether it is there.
+    """
+    from urllib.request import urlopen
+
+    url = f"http://{_LOOPBACK}:{port}/_/GET/EXTSTATE/reapy/server_port"
+    try:
+        with urlopen(url, timeout=_WEB_INTERFACE_TIMEOUT_SECONDS) as answer:
+            body = answer.read().decode("utf-8", "replace")
+    except Exception:
+        return NO_ANSWER
+    # Reaper answers with tab-separated fields, the value last. An
+    # empty value means the key exists and holds nothing, which is
+    # precisely the state that sends reapy into the loop above.
+    return READY if body.rsplit(chr(9), 1)[-1].strip() else NO_SERVER
+
+
 def _reaper_web_interface_answers(reapy) -> bool:
-    """Whether Reaper's ReaScript web interface responds on localhost.
+    """Whether Reaper's ReaScript web interface responds on the loopback.
 
     This is the one thing observable from outside that means "Reaper is
     definitely running", which is what lets unavailable_reason separate
@@ -331,9 +467,33 @@ def _reaper_web_interface_answers(reapy) -> bool:
     from urllib.request import urlopen
 
     port = getattr(getattr(reapy, "config", None), "WEB_INTERFACE_PORT", 2307)
-    url = f"http://localhost:{port}/_/GET/EXTSTATE/reapy/server_port"
+    # _LOOPBACK, not "localhost" - see that constant. Using the name here
+    # would spend the IPv6 timeout on every status refresh, and would
+    # also make the probe disagree with a reapy that had been pointed at
+    # IPv4, which is the one thing this probe must never do.
+    url = f"http://{_LOOPBACK}:{port}/_/GET/EXTSTATE/reapy/server_port"
     try:
         with urlopen(url, timeout=_WEB_INTERFACE_TIMEOUT_SECONDS):
+            return True
+    except Exception:
+        return False
+
+
+def _reaper_web_interface_answers_over_name(reapy) -> bool:
+    """The same probe, but by name - used ONLY to explain a failure.
+
+    Never to decide that Reaper is reachable: everything else talks to
+    the numeric address, so a "yes" here would promise a connection the
+    rest of the code cannot make. It exists so that "reachable by name,
+    not by address" can be reported as the local-network oddity it is,
+    instead of being misreported as Reaper being closed.
+    """
+    from urllib.request import urlopen
+
+    port = getattr(getattr(reapy, "config", None), "WEB_INTERFACE_PORT", 2307)
+    try:
+        with urlopen(f"http://localhost:{port}/_/GET/EXTSTATE/reapy/server_port",
+                     timeout=_WEB_INTERFACE_TIMEOUT_SECONDS):
             return True
     except Exception:
         return False
@@ -376,24 +536,63 @@ class ReaperBackend(Backend):
         The retry only runs when the web interface has already answered,
         so it can't hang on a Reaper that isn't there.
         """
+        # BEFORE importing reapy, because importing it is the dangerous
+        # part - see bridge_server_state. Reaper running with no bridge
+        # server is the one state where `import reapy` never returns, and
+        # nothing after the import can rescue that.
+        state = bridge_server_state()
+        if state == NO_SERVER:
+            return (
+                "Reaper is running and set up, but its DAWBridge bridge script isn't "
+                "starting - so Reaper never finishes answering, and DAWBridge won't try. "
+                "Close Reaper, press \"Set up Reaper...\" again, then reopen it. If it "
+                "keeps happening, Reaper is failing to load the bundled Python: check "
+                "Options > Preferences > Plug-ins > ReaScript in Reaper for an error."
+            )
+
         try:
             import reapy
         except ImportError as exc:
             return missing_client_library_reason("Reaper", "reapy", "python-reapy", exc)
 
-        if reapy.is_inside_reaper() or reapy.dist_api_is_enabled():
+        if reapy.is_inside_reaper():
+            return None
+
+        # Before anything asks whether Reaper is reachable, make sure the
+        # asking is done over IPv4. reapy resolves "localhost" fresh on
+        # every connection and gets ::1 first on Windows, where Reaper
+        # binds IPv4 only - see _LOOPBACK. This is the gate every
+        # operation passes through, so it is the one place that
+        # guarantees the client is pointed somewhere that can answer.
+        ipv4_problem = use_ipv4_loopback(reapy)
+
+        if reapy.dist_api_is_enabled():
             return None
 
         if not _reaper_web_interface_answers(reapy):
+            if ipv4_problem and _reaper_web_interface_answers_over_name(reapy):
+                # Reachable by name but not by address: something local
+                # is redirecting or filtering the loopback. Say so rather
+                # than report Reaper closed, because it plainly isn't.
+                return (
+                    f"Reaper is running, but only answers on 'localhost', not on {_LOOPBACK}. "
+                    f"That usually means a proxy, VPN or firewall is intercepting local "
+                    f"connections. DAWBridge uses the numeric address on purpose - the name "
+                    f"resolves to IPv6 first on Windows and Reaper does not listen there."
+                )
             return (
-                "Reaper isn't answering on localhost:2307. Either it isn't running, or "
-                "it hasn't been set up yet - DAWBridge can't tell those apart. If Reaper "
-                "is open, close it and press \"Set up Reaper...\"; DAWBridge brings its "
-                "own Python, so there is nothing to install."
+                f"Reaper isn't answering on {_LOOPBACK}:2307. Either it isn't running, or "
+                f"it hasn't been set up yet - DAWBridge can't tell those apart. If Reaper "
+                f"is open, close it and press \"Set up Reaper...\"; DAWBridge brings its "
+                f"own Python, so there is nothing to install."
             )
 
         try:
-            reapy.reconnect()
+            # Bounded: reconnect goes back through WebInterface, whose
+            # perform_action passes no timeout of its own. Unbounded here
+            # is how a status refresh froze the whole window.
+            with _socket_timeout_floor(_REAPY_CALL_CEILING_SECONDS):
+                reapy.reconnect()
         except Exception:
             pass  # the message below is already the right one
         if reapy.dist_api_is_enabled():

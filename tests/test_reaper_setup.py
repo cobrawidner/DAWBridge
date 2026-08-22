@@ -10,12 +10,40 @@ closes.
 The one thing not covered is the thing no test can cover: whether Reaper
 itself loads this interpreter. That needs a live Reaper.
 """
+import sys
 import zipfile
 from pathlib import Path
 
 import pytest
 
 from dawbridge import reapersetup
+from dawbridge.reaper_backend import NO_SERVER, bridge_server_state
+
+
+def _reapy_import_would_hang() -> bool:
+    """Whether `import reapy` is currently a trap on this machine.
+
+    reapy connects at module-import time and, when Reaper is running
+    without its bridge server, recurses forever trying to start one -
+    see reaper_backend.bridge_server_state. A developer with Reaper open
+    in that state would otherwise watch the whole suite hang with no
+    output, which is a far worse experience than a named skip.
+
+    Already-imported is always safe: the connect happened once and
+    whatever it did, it finished.
+    """
+    if "reapy" in sys.modules:
+        return False
+    return bridge_server_state() == NO_SERVER
+
+
+#: The tests below drive reapy's real ini writers rather than fakes,
+#: because the whole point of them is that reapy is called with OUR
+#: interpreter and OUR script path. That means really importing it.
+needs_reapy = pytest.mark.skipif(
+    _reapy_import_would_hang(),
+    reason="Reaper is running without its bridge server; `import reapy` would never return",
+)
 
 
 def _fake_runtime_zip(tmp_path: Path, *, dll: str = "python310.dll",
@@ -154,6 +182,7 @@ def _write_ini(tmp_path: Path, **values) -> Path:
     return resource
 
 
+@needs_reapy
 def test_a_config_reaper_reverted_is_reported_not_celebrated(tmp_path):
     """Reaper rewrites reaper.ini from memory when it quits, so edits
     made while it is open are silently undone. Reporting success there
@@ -165,12 +194,14 @@ def test_a_config_reaper_reverted_is_reported_not_celebrated(tmp_path):
     assert problem is not None and "still open" in problem
 
 
+@needs_reapy
 def test_reascript_left_switched_off_is_reported(tmp_path):
     resource = _write_ini(tmp_path, reascript="0", pythonlibdll64="python310.dll")
 
     assert reapersetup.verify(resource, tmp_path / "python310.dll") is not None
 
 
+@needs_reapy
 def test_a_config_that_took_verifies_clean(tmp_path):
     resource = _write_ini(tmp_path, reascript="1", pythonlibdll64="python310.dll")
 
@@ -179,6 +210,7 @@ def test_a_config_that_took_verifies_clean(tmp_path):
 
 # ---- the whole configure step, against a fake Reaper install ----------
 
+@needs_reapy
 def test_configure_writes_everything_reaper_needs(tmp_path):
     """The real integration point, exercised without a live Reaper.
 
@@ -211,6 +243,7 @@ def test_configure_writes_everything_reaper_needs(tmp_path):
     assert len(steps) == 3
 
 
+@needs_reapy
 def test_configure_keeps_a_backup_of_settings_it_edits(tmp_path):
     """reaper.ini holds preferences someone may have spent years on."""
     resource = tmp_path / "REAPER"
@@ -226,3 +259,87 @@ def test_configure_keeps_a_backup_of_settings_it_edits(tmp_path):
 
     assert (resource / "reaper.ini.bak").exists()
     assert "mycherished=1" in (resource / "reaper.ini").read_text(encoding="utf-8")
+
+
+# ---- the fused-entry corruption ---------------------------------------
+
+def _kb(tmp_path: Path, body: str) -> Path:
+    resource = tmp_path / "REAPER"
+    resource.mkdir(exist_ok=True)
+    (resource / "reaper-kb.ini").write_text(body, encoding="utf-8")
+    return resource
+
+
+_ENTRY_A = r'SCR 4 0 RSaaa "Custom: activate_reapy_server.py" C:\Py310\reapy\activate_reapy_server.py'
+_ENTRY_B = r'SCR 4 0 RSbbb "Custom: activate_reapy_server.py" C:\DAWBridge\reapy\activate_reapy_server.py'
+
+
+def test_fused_entries_are_split_back_apart(tmp_path):
+    """The real failure, byte for byte. reapy appends with no trailing
+    newline, so a second entry lands on the end of the first and Reaper
+    can parse neither - DAWBridge then triggers an action id Reaper has
+    never heard of, nothing runs, and reapy waits forever for a server
+    that will never start. Seen on a real install: 400 bytes, two
+    entries, zero newlines.
+    """
+    resource = _kb(tmp_path, _ENTRY_A + _ENTRY_B)
+
+    assert reapersetup.repair_script_list(resource) is True
+
+    lines = (resource / "reaper-kb.ini").read_text(encoding="utf-8").splitlines()
+    assert lines == [_ENTRY_A, _ENTRY_B]
+
+
+def test_repair_leaves_a_trailing_newline_so_the_next_append_is_safe(tmp_path):
+    """Repairing damage already done is half of it; the other half is
+    that reapy's next append must not recreate it."""
+    resource = _kb(tmp_path, _ENTRY_A)
+
+    reapersetup.repair_script_list(resource)
+
+    assert (resource / "reaper-kb.ini").read_text(encoding="utf-8").endswith(chr(10))
+
+
+def test_a_healthy_file_is_left_completely_alone(tmp_path):
+    """This file holds key bindings someone may have spent years on. A
+    repair that 'tidied' anything would be worse than the bug."""
+    body = _ENTRY_A + chr(10) + _ENTRY_B + chr(10)
+    resource = _kb(tmp_path, body)
+
+    assert reapersetup.repair_script_list(resource) is False
+    assert (resource / "reaper-kb.ini").read_text(encoding="utf-8") == body
+
+
+def test_repair_keeps_a_backup_of_what_it_replaced(tmp_path):
+    resource = _kb(tmp_path, _ENTRY_A + _ENTRY_B)
+
+    reapersetup.repair_script_list(resource)
+
+    assert (resource / "reaper-kb.ini.bak").read_text(encoding="utf-8") == _ENTRY_A + _ENTRY_B
+
+
+def test_a_missing_script_list_is_not_an_error(tmp_path):
+    resource = tmp_path / "REAPER"
+    resource.mkdir()
+    assert reapersetup.repair_script_list(resource) is False
+
+
+@needs_reapy
+def test_configure_repairs_before_adding_its_own_entry(tmp_path):
+    """The wiring. Without this ordering, configure() adds a third entry
+    onto the end of an already-fused line and makes it worse."""
+    resource = tmp_path / "REAPER"
+    resource.mkdir()
+    (resource / "reaper.ini").write_text("[reaper]\ncsurf_cnt=0\n", encoding="utf-8")
+    (resource / "reaper-kb.ini").write_text(_ENTRY_A + _ENTRY_B, encoding="utf-8")
+
+    runtime = tmp_path / "runtime"
+    reapersetup.unpack_runtime(_fake_runtime_zip(tmp_path), runtime)
+    steps = reapersetup.configure(resource, reapersetup.find_dll(runtime),
+                                  reapersetup.server_script(runtime))
+
+    body = (resource / "reaper-kb.ini").read_text(encoding="utf-8")
+    assert ".pySCR" not in body           # nothing fused, old or new
+    entries = [l for l in body.splitlines() if l.startswith("SCR 4 0 ")]
+    assert len(entries) == 3              # the two originals plus ours
+    assert any("repaired" in s for s in steps)

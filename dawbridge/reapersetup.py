@@ -43,6 +43,7 @@ Three things here are non-negotiable, each learned from how this fails:
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -178,6 +179,47 @@ def unpack_runtime(archive: Path, runtime: Path) -> Path:
     return find_dll(runtime)
 
 
+#: A script entry in reaper-kb.ini. reapy writes these with `open(..., "a")`
+#: and no trailing newline (config.py's add_reascript), so appending a
+#: second one fuses it onto the first: "...activate_reapy_server.pySCR 4 0
+#: RSLv...". Reaper cannot parse the fused entry, so the action simply does
+#: not exist - DAWBridge then asks Reaper to run an id Reaper has never
+#: heard of, nothing happens, no Python is loaded, and reapy waits forever
+#: for a server that will never start. Confirmed on a real install: a
+#: 400-byte reaper-kb.ini containing two entries and zero newlines.
+_FUSED_ENTRY = re.compile(r"(?<=\.py)(?=SCR 4 0 )")
+
+
+def repair_script_list(resource: Path) -> bool:
+    """Undo the fused-entry corruption in reaper-kb.ini. True if it changed.
+
+    Runs before adding our own entry, so it both repairs damage already
+    done and stops the next append from causing more. Deliberately narrow:
+    it splits only at the exact `.py` + `SCR 4 0 ` junction that this bug
+    produces, and guarantees a trailing newline. It never reorders,
+    rewrites or removes an entry - this file holds key bindings someone
+    may have spent years on, and a repair that "tidied" it would be worse
+    than the bug.
+    """
+    path = Path(resource) / "reaper-kb.ini"
+    if not path.exists():
+        return False
+    original = path.read_text(encoding="utf-8", errors="replace")
+
+    repaired = _FUSED_ENTRY.sub(chr(10), original)
+    if repaired and not repaired.endswith(chr(10)):
+        repaired += chr(10)
+    if repaired == original:
+        return False
+
+    # Same backup discipline as reaper.ini: keep what we are replacing.
+    backup = path.with_suffix(path.suffix + ".bak")
+    if not backup.exists():
+        backup.write_text(original, encoding="utf-8")
+    path.write_text(repaired, encoding="utf-8")
+    return True
+
+
 def describe_state(resource: Path | None, runtime: Path) -> list[str]:
     """Plain-language lines about what is and isn't set up yet."""
     lines = []
@@ -219,6 +261,12 @@ def configure(resource: Path, dll: Path, script: Path) -> list[str]:
 
     add_web_interface(str(resource), WEB_INTERFACE_PORT)
     done.append(f"enabled Reaper's web interface on port {WEB_INTERFACE_PORT}")
+
+    # Before adding ours: reapy's own appends leave the file with no
+    # trailing newline, so a second entry fuses onto the first and Reaper
+    # can parse neither. See repair_script_list.
+    if repair_script_list(resource):
+        done.append("repaired Reaper's action list (entries had run together)")
 
     # The same four steps configure_reaper() takes, minus enable_python.
     # The ext-state write is not optional bookkeeping: it is how the
