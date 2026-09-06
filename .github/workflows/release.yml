@@ -1,7 +1,7 @@
 # Build DAWBridge.exe on GitHub and attach it to a Release.
 #
 # Why this exists: the alternative is Travis building locally and copying
-# the .exe into Dropbox by hand every time, which means the collaborator's
+# the .exe into Google Drive by hand every time, which means the collaborator's
 # copy is only as current as the last time someone remembered. Here, a tag
 # produces a download link that is always the real build of that tag.
 #

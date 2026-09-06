@@ -1,7 +1,7 @@
 # DAWBridge — getting started
 
 DAWBridge lets several people work on the same song in **different DAWs**.
-Some of you are in Reaper, some in Pro Tools, and a shared Dropbox folder
+Some of you are in Reaper, some in Pro Tools, and a shared Google Drive folder
 passes the arrangement back and forth.
 
 You don't need to understand anything technical to use it. You do need to
@@ -46,7 +46,7 @@ The buttons sit left to right in the order you use them.
 
 ## Setting up, once
 
-1. **Install Dropbox** and accept the shared folder invitation. Let it finish
+1. **Install Google Drive** and accept the shared folder invitation. Let it finish
    syncing before you do anything else — the folder contains audio, and it can
    take a while.
 2. **Open your DAW** and open the song you're working on. DAWBridge talks to
@@ -85,7 +85,7 @@ It remembers all three next time.
 5. **Save your project in your DAW.** DAWBridge reads what your DAW currently
    has; unsaved work is a grey area, so save first.
 6. **Push to Bridge** — publishes your version.
-7. Wait for Dropbox to finish syncing before you close the laptop.
+7. Wait for Google Drive to finish syncing before you close the laptop.
 
 There's no preview of a publish — the preview only shows what a *pull* would
 change in your DAW. Before publishing, the thing to check is that you pulled
@@ -112,12 +112,12 @@ project.** That matters for three reasons:
 
 - Your project keeps working if the shared folder is moved, renamed,
   unshared, or simply offline.
-- Your DAW isn't playing files out of a folder Dropbox is syncing
+- Your DAW isn't playing files out of a folder Google Drive is syncing
   underneath it.
 - Your DAW's waveform and peak files stay on your machine instead of being
   written into the shared folder, where they'd sync to everyone.
 
-To be clear about what this is *not*: audio read from Dropbox isn't damaged
+To be clear about what this is *not*: audio read from Google Drive isn't damaged
 or lower quality — the file is identical either way. This is about the file
 staying put and staying available.
 
@@ -153,11 +153,11 @@ Your collaborators publish in the few seconds it took to read your DAW.
 Nothing was written. Load theirs, then publish again.
 
 **"clips reference audio missing from the shared folder"**
-Usually Dropbox simply hasn't finished downloading. Check the Dropbox icon,
+Usually Google Drive simply hasn't finished downloading. Check the Google Drive icon,
 wait, try again. If it persists, the audio genuinely didn't get published.
 
 **A "conflicted copy" is mentioned**
-Two of you published at almost the same moment and Dropbox kept both files. One
+Two of you published at almost the same moment and Google Drive kept both files. One
 version is sitting in a file nobody is reading. Don't publish again until it's
 sorted — ask for help, because the extra file is the only copy of somebody's
 work.

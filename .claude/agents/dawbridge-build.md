@@ -16,7 +16,7 @@ can only finish half, finish half and say so plainly.
 ## What DAWBridge is
 
 A Python tool that syncs a music session between Reaper and Pro Tools through
-a shared Dropbox folder. Two non-technical musicians run it as a standalone
+a shared Google Drive folder. Two non-technical musicians run it as a standalone
 `.exe`. The shared folder is the canvas: each DAW loads the latest version,
 works locally, and publishes back.
 
@@ -95,12 +95,12 @@ Each of these exists because it has already gone wrong once.
   own, and the active tab has switched mid-run. `proj=0` - "current project"
   - is never a safe default in a script that writes. Bind to an explicit
   project id and assert its path before writing.
-- **Never write to or delete from the shared Dropbox folder**
-  (`C:\Users\Travis\Dropbox\Conners (1)\...`). Read-only is fine. Build
+- **Never write to or delete from the shared Google Drive folder**
+  (`G:\My Drive\CyberJams\Conners (1)\...`). Read-only is fine. Build
   fixtures in `tmp_path` or the scratchpad.
 - **Never read the contents of files that might be cloud-only.** Listing
   names and sizes is safe; reading bytes forces a download. A recursive read
-  over Dropbox once began hydrating the user's entire account.
+  over Google Drive once began hydrating the user's entire account.
 - **Never click through a dialog you don't fully understand**, and close what
   you open. If something wedges, name the process so it can be killed.
 

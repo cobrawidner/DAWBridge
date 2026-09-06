@@ -11,7 +11,7 @@ Your job is to find the ways it will let them down and fix them.
 ## What DAWBridge is
 
 A Python tool that syncs a music session between Reaper and Pro Tools through
-a shared Dropbox folder. Each user runs a small desktop app, points it at the
+a shared Google Drive folder. Each user runs a small desktop app, points it at the
 folder, picks their DAW, and clicks Pull / Preview / Push.
 
 The mental model, in the user's own words: the shared folder is *the canvas*.
@@ -23,7 +23,7 @@ that's `C:\Users\Travis\Claude Code\dawbridge`; in a cloud checkout it's
 wherever the repo was cloned. Use repo-relative paths.
 
 **Know which one you're in.** In a cloud checkout there are no DAWs, no
-Dropbox folder and no real projects — that's expected, not a broken setup.
+Google Drive folder and no real projects — that's expected, not a broken setup.
 The entire test suite runs without any of them, so nearly all of this work
 is doable either way. What you cannot do from a checkout is verify anything
 against a live DAW; say so plainly rather than reasoning your way to a
@@ -83,10 +83,10 @@ dangerous than one that doesn't.
 Bugs first, features second. Some specific angles worth taking, not a
 checklist and not exhaustive:
 
-- **What happens when two people act at once?** Dropbox resolves simultaneous
+- **What happens when two people act at once?** Google Drive resolves simultaneous
   writes by leaving `session (conflicted copy).json` next to the real one.
   Does anything notice? What does a user see?
-- **What happens when the folder isn't fully synced?** Dropbox files can be
+- **What happens when the folder isn't fully synced?** Google Drive files can be
   cloud-only placeholders. Referenced audio may be listed but not present
   locally. Reading it to check would force a download of gigabytes.
 - **Is the shared session self-consistent?** Do all clips resolve to audio
@@ -156,19 +156,19 @@ These exist because each one has already gone wrong once.
   test once damaged a track in `D:\REAPER (x64)\Shady Grove` — a real
   project with real work in it — and it had to be restored from a `.rpp-bak`.
   If you need a project to test against, copy one to the scratchpad first.
-- **Never write to or delete from the shared Dropbox folder**
-  (`C:\Users\Travis\Dropbox\Conners (1)\DAWBridge Common Folder\...`).
+- **Never write to or delete from the shared Google Drive folder**
+  (`G:\My Drive\CyberJams\Conners (1)\DAWBridge Common Folder\...`).
   Read-only is fine. Build test fixtures in `tmp_path` or the scratchpad.
-- **Never read the contents of files in Dropbox that might be cloud-only.**
+- **Never read the contents of files in Google Drive that might be cloud-only.**
   Listing names and sizes with `stat` is safe; reading bytes forces a
-  download. A recursive search over Dropbox once began hydrating the user's
+  download. A recursive search over Google Drive once began hydrating the user's
   entire account and had to be killed. Small JSON is fine; audio is not.
 - **Do not assume a DAW is running.** Reaper and Pro Tools may or may not be
   open. Check `backend.is_available()` and degrade gracefully; never make a
   live DAW a prerequisite for your work.
 
 Put anything temporary in the session scratchpad your environment gives you,
-never in the repo. The safety rules above about Dropbox, the real projects
+never in the repo. The safety rules above about Google Drive, the real projects
 and live DAWs apply on Travis's Windows machine; in a cloud checkout those
 paths simply don't exist, which is fine — build fixtures in `tmp_path`
 either way.

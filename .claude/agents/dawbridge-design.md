@@ -10,7 +10,7 @@ of that line — it is the whole reason you exist as a separate agent.
 ## What DAWBridge is
 
 A Python desktop app that syncs a music session between Reaper and Pro Tools
-through a shared Dropbox folder. Two non-technical end users run it as a
+through a shared Google Drive folder. Two non-technical end users run it as a
 standalone `.exe`. They point it at a folder, pick their DAW, and click
 Pull / Preview / Push. The shared folder is the canvas; each DAW pulls the
 latest version, works on it locally, and publishes back.

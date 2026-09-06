@@ -1,5 +1,5 @@
 """The archive is the only thing standing behind a destructive publish,
-so it has to be reachable without hand-editing JSON in Dropbox.
+so it has to be reachable without hand-editing JSON in Google Drive.
 """
 from dawbridge.cli import main
 from dawbridge.model import Session, Track

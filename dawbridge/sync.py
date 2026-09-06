@@ -976,7 +976,7 @@ def missing_audio_warning(clip: Clip, track_name: str, store) -> str | None:
     silence.
 
     `exists()` is a stat, not a read, so this is safe against cloud-only
-    Dropbox placeholders - it does not trigger a download.
+    Google Drive placeholders - it does not trigger a download.
     """
     if store is None:
         return None

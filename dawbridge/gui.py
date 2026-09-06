@@ -343,8 +343,8 @@ class DawBridgeGUI(ttk.Frame):
     def _show_folder_tail(self) -> None:
         """Scroll the path field to its end.
 
-        A shared folder lives several levels inside Dropbox, so the
-        field showed `C:\\Users\\Travis\\Dropbox\\Conn...` and cut off the
+        A shared folder lives several levels inside Google Drive, so the
+        field showed `C:\\Users\\Travis\\Google Drive\\Conn...` and cut off the
         one part that says which project is about to be synced.
 
         Before the first layout pass the field is one pixel wide and
@@ -723,7 +723,7 @@ class DawBridgeGUI(ttk.Frame):
         """"Check folder" - the GUI half of `dawbridge doctor`.
 
         Runs on the worker thread: it stats every referenced audio file,
-        and on a Dropbox folder that is not instant.
+        and on a Google Drive folder that is not instant.
         """
         store = SharedStore(folder)
         if not store.session_path.exists():
@@ -1098,7 +1098,7 @@ class DawBridgeGUI(ttk.Frame):
         The first pull of a project is usually into an empty, never-saved
         one - that is what "start collaborating" looks like. An unsaved
         project has no folder, so there is nowhere local to put the audio
-        and every clip plays from Dropbox forever (see localmedia).
+        and every clip plays from Google Drive forever (see localmedia).
 
         DAWBridge used to ask for a path itself and hand it to Reaper.
         That is gone: Reaper's Save dialog ignores a supplied filename,
@@ -1128,7 +1128,7 @@ class DawBridgeGUI(ttk.Frame):
                 "Save it now and DAWBridge keeps its own copy of the audio beside "
                 "it, so the project keeps working even if the shared folder moves "
                 "or goes offline - and your DAW stops playing files out of a "
-                "folder Dropbox is syncing underneath it.\n\n"
+                "folder Google Drive is syncing underneath it.\n\n"
                 "Reaper will ask you where to put it. Skip this and the clips "
                 "play straight from the shared folder.\n\n"
                 "Save the project now?")):

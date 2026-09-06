@@ -48,9 +48,9 @@ def test_silent_when_the_audio_is_there(tmp_path):
 
 
 def test_check_is_stat_only_so_cloud_files_are_not_downloaded(tmp_path, monkeypatch):
-    # Dropbox files can be cloud-only placeholders: exists() is free,
+    # Google Drive files can be cloud-only placeholders: exists() is free,
     # reading a byte forces a download of the whole file. A recursive read
-    # over this folder once began hydrating an entire Dropbox account.
+    # over this folder once began hydrating an entire Google Drive account.
     store = _store_with(tmp_path, "abc_stem.wav")
     clip = Clip.new(name="Verse", audio_file="abc_stem.wav", start_seconds=0, length_seconds=8)
 

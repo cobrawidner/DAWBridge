@@ -1,9 +1,9 @@
 """Detects the files a syncing service leaves behind when two people write
 the same file at once.
 
-Dropbox does not merge and does not ask. When two machines write
-session.json at nearly the same moment, one write keeps the name and the
-other is renamed to something like:
+No consumer sync service merges, and none of them ask. When two machines
+write session.json at nearly the same moment, one write keeps the name
+and the other is kept under a different one. Dropbox names it:
 
     session (Conner's conflicted copy 2026-08-09).json
 
@@ -25,13 +25,28 @@ Confirmed by test (tests/test_conflicts.py) using the real store.
 
 So detection has to be by filename, and it has to be loud. Everything
 here is stat/listing only - no recursion and no reading of audio, because
-these files live in Dropbox where reading bytes forces a download.
+these files live in a synced folder where reading bytes forces a
+download.
+
+**Two detectors, deliberately.** The name-pattern one below knows
+Dropbox's wording. The project moved to Google Drive in September 2026,
+and Drive's conflict naming is NOT something this file knows - so a
+detector that only matched Dropbox's phrasing would have silently
+stopped working at exactly the moment nobody noticed, on the one check
+that catches a lost publish. `find_stray_sessions` is the answer: in the
+shared root there should be exactly one file called session.json and
+nothing else matching session*.json, whatever a sync service decided to
+call its copy. It needs no knowledge of any service's conventions and
+cannot go quietly out of date.
 """
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
+#: Dropbox's wording, kept because it is precise where it applies and
+#: some collaborators may still be on Dropbox. It is NOT sufficient on
+#: its own - see find_stray_sessions.
 #: Dropbox has used several wordings over the years ("conflicted copy",
 #: "'s conflicted copy", with and without a date) and adds a separate
 #: "(Case Conflict)" for names differing only in case. Match the phrase
@@ -63,8 +78,8 @@ def original_name(name: str) -> str:
 def find_conflicts(root: Path) -> list[Path]:
     """Every conflicted-copy file in the shared folder, newest name first.
 
-    Listing only - nothing here opens a file, so this is safe to call on a
-    Dropbox folder full of cloud-only audio.
+    Listing only - nothing here opens a file, so this is safe to call on
+    a synced folder full of cloud-only audio.
     """
     found: list[Path] = []
     for sub in _SCAN_DIRS:
@@ -77,11 +92,45 @@ def find_conflicts(root: Path) -> list[Path]:
     return sorted(found)
 
 
+def find_stray_sessions(root: Path) -> list[Path]:
+    """Files in the shared root that look like another copy of session.json.
+
+    The shared root holds exactly one session.json, plus notify.json and
+    the audio/ and archive/ directories. Anything else matching
+    `session*.json` there is a second copy of the canonical session that
+    nothing is reading - which is what a lost publish looks like on disk.
+
+    Named-pattern free on purpose. Dropbox writes "(conflicted copy)";
+    Google Drive does something else; the next service will do a third
+    thing. This asks the question that actually matters - "is there more
+    than one session file here?" - so it keeps working when the wording
+    changes or the whole service does.
+
+    Root only, never archive/, which is *supposed* to be full of
+    session.rNNNN.json.
+    """
+    try:
+        entries = list(Path(root).iterdir())
+    except OSError:
+        return []
+    return sorted(
+        p for p in entries
+        if p.is_file()
+        and p.name.lower() != "session.json"
+        and p.name.lower().startswith("session")
+        and p.suffix.lower() == ".json"
+    )
+
+
 def find_session_conflicts(root: Path) -> list[Path]:
     """Conflicted copies of session.json specifically - the ones that mean
     somebody's publish was lost rather than just a duplicated file.
     """
-    return [p for p in find_conflicts(root) if original_name(p.name).lower() == "session.json"]
+    named = [p for p in find_conflicts(root) if original_name(p.name).lower() == "session.json"]
+    # Union, not either/or: a Dropbox-named copy also matches
+    # session*.json, and dropping one detector for the other would lose
+    # the case each is better at.
+    return sorted(set(named) | set(find_stray_sessions(root)))
 
 
 def describe_session_conflict(root: Path) -> str | None:

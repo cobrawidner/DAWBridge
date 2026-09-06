@@ -3,7 +3,7 @@
 Two properties matter more than the feature working: a notification must
 never break a sync, and the URL must never be a way to send session
 details somewhere that isn't Discord - it lives in a folder the other
-person and Dropbox can both write to.
+person and Google Drive can both write to.
 
 Nothing here touches the network. `post()` takes a sender for exactly
 that reason.

@@ -87,7 +87,7 @@ class SharedStore:
         # revision this in-memory session was loaded at. Those differ
         # whenever the shared folder moved underneath us - the partner
         # published while this machine had the session open, which on a
-        # Dropbox folder is ordinary, not exotic. Bumping from the stale
+        # Google Drive folder is ordinary, not exotic. Bumping from the stale
         # number would write a revision at or below one that already
         # existed, and every "has this moved since I last looked?" check
         # compares revision numbers (syncstate.describe_drift), so the

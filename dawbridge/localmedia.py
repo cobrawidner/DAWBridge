@@ -9,19 +9,19 @@ real shared file (confirmed live). Its fix - copy into the session's own
 generalises so Reaper can do the same.
 
 Reaper's version of the problem is different but not smaller. It handed
-the Dropbox path to `PCM_Source_CreateFromFile` and left it there
+the Google Drive path to `PCM_Source_CreateFromFile` and left it there
 permanently, which means:
 
   - the project breaks if the folder moves, is unshared, or goes offline,
   - Reaper writes `.reapeaks` files into the shared store, where they
     sync to everyone and belong to no one,
-  - Dropbox may re-sync a file underneath a DAW that has it open,
+  - Google Drive may re-sync a file underneath a DAW that has it open,
   - a cloud-only placeholder looks like a file to `exists()` and like
     silence to the DAW,
   - playback streams from a directory a background daemon is writing to.
 
 **The reason matters, because a wrong one invites the wrong fix.** Audio
-read from Dropbox is not degraded - the bytes are identical, and nothing
+read from Google Drive is not degraded - the bytes are identical, and nothing
 here should ever touch bit depth, sample rate or format to "improve" it.
 The problems are the five above: availability and interference, not
 fidelity.
@@ -46,7 +46,7 @@ MEDIA_DIR_NAME = "Audio Files"
 
 # Where a project goes when the user has never saved one and DAWBridge
 # has to suggest somewhere. Documents rather than the shared folder:
-# putting the project back on Dropbox would reintroduce every problem
+# putting the project back on Google Drive would reintroduce every problem
 # above, and putting it next to the .exe would hide it.
 DEFAULT_PROJECTS_DIR = Path.home() / "Documents" / "DAWBridge"
 

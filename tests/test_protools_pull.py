@@ -202,7 +202,7 @@ def test_adopting_a_clip_never_renames_the_file_on_disk(store):
 
     This matters well beyond a tidy filename: Pro Tools' AddAudio imports
     BY REFERENCE, so a session can legitimately reference audio that
-    lives anywhere - a sample library, or the shared Dropbox folder. A
+    lives anywhere - a sample library, or the shared Google Drive folder. A
     pull would rename and rewrite whatever it found there.
     """
     calls = []

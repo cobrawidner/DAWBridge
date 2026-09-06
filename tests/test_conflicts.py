@@ -1,6 +1,6 @@
-"""Two people publishing at once, and what Dropbox does about it.
+"""Two people publishing at once, and what Google Drive does about it.
 
-Dropbox does not merge and does not ask: one write keeps the name
+Google Drive does not merge and does not ask: one write keeps the name
 session.json, the other is renamed to "session (X's conflicted copy
 DATE).json" and left there. Before this module existed, nothing in
 DAWBridge had any idea that file could be there, and the loser's entire
@@ -23,7 +23,7 @@ def isolated_state(tmp_path, monkeypatch):
 
 
 def _conflict_scenario(folder):
-    """Both machines start at r1; both publish; Dropbox keeps A's file and
+    """Both machines start at r1; both publish; Google Drive keeps A's file and
     sets B's aside. Returns (store, conflicted_path).
     """
     store = SharedStore(folder)
@@ -119,7 +119,7 @@ def test_drift_reports_conflict_and_ordinary_drift_together(tmp_path):
 
 
 def test_identical_conflicted_copy_is_not_worth_mentioning(tmp_path):
-    # Dropbox does sometimes conflict two byte-identical writes. Nothing
+    # Google Drive does sometimes conflict two byte-identical writes. Nothing
     # was lost, and a warning nobody can act on trains people to skim.
     folder = tmp_path / "shared"
     store = SharedStore(folder)
@@ -179,7 +179,7 @@ def test_audio_conflicts_are_listed_but_do_not_block_publishing(tmp_path):
 
 
 def test_scan_never_walks_into_the_audio_tree(tmp_path, monkeypatch):
-    # Audio lives in Dropbox and can be cloud-only; recursing into it (or
+    # Audio lives in Google Drive and can be cloud-only; recursing into it (or
     # reading any of it) would start hydrating gigabytes. Listing names is
     # the only thing allowed.
     folder = tmp_path / "shared"
@@ -214,3 +214,67 @@ def test_a_conflicted_copy_survives_json_round_trip(tmp_path):
 
     assert recovered.updated_by == "b@protools"
     assert json.loads(path.read_text(encoding="utf-8"))["revision"] == recovered.revision
+
+
+# ---- service-agnostic detection ---------------------------------------
+
+def test_a_stray_session_copy_is_found_whatever_the_service_called_it(tmp_path):
+    """The project moved from Dropbox to Google Drive, and Drive does not
+    use Dropbox's "conflicted copy" wording. A detector that only knew
+    one service's phrasing would have gone quietly dead on the one check
+    that catches a lost publish."""
+    (tmp_path / "session.json").write_text('{"revision": 5}', encoding="utf-8")
+    (tmp_path / "session (1).json").write_text('{"revision": 5}', encoding="utf-8")
+
+    found = conflicts.find_stray_sessions(tmp_path)
+
+    assert [p.name for p in found] == ["session (1).json"]
+
+
+def test_the_real_session_is_never_reported_as_a_stray(tmp_path):
+    (tmp_path / "session.json").write_text("{}", encoding="utf-8")
+
+    assert conflicts.find_stray_sessions(tmp_path) == []
+
+
+def test_the_archive_is_not_mistaken_for_strays(tmp_path):
+    """archive/ is SUPPOSED to be full of session.rNNNN.json. Scanning it
+    would report the recovery mechanism as the problem."""
+    (tmp_path / "session.json").write_text("{}", encoding="utf-8")
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    for rev in (1, 2, 3):
+        (archive / f"session.r{rev:04d}.json").write_text("{}", encoding="utf-8")
+    (archive / "session.json.bak").write_text("{}", encoding="utf-8")
+
+    assert conflicts.find_stray_sessions(tmp_path) == []
+
+
+def test_other_files_in_the_root_are_left_alone(tmp_path):
+    (tmp_path / "session.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "notify.json").write_text("{}", encoding="utf-8")
+
+    assert conflicts.find_stray_sessions(tmp_path) == []
+
+
+def test_a_drive_style_stray_reaches_the_human_facing_report(tmp_path):
+    """The wiring: a stray with different content has to produce the same
+    loud paragraph a Dropbox-named one would."""
+    (tmp_path / "session.json").write_text('{"revision": 5}', encoding="utf-8")
+    (tmp_path / "session (1).json").write_text('{"revision": 4}', encoding="utf-8")
+
+    message = conflicts.describe_session_conflict(tmp_path)
+
+    assert message is not None
+    assert "session (1).json" in message
+
+
+def test_an_identical_stray_stays_quiet(tmp_path):
+    """Same reasoning as for a Dropbox copy: if the bytes match, nothing
+    was lost, and a warning nobody can act on is one people learn to
+    skim."""
+    same = '{"revision": 5}'
+    (tmp_path / "session.json").write_text(same, encoding="utf-8")
+    (tmp_path / "session (1).json").write_text(same, encoding="utf-8")
+
+    assert conflicts.describe_session_conflict(tmp_path) is None

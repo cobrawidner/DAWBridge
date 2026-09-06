@@ -16,7 +16,7 @@ Three rules shape everything here:
    revision, and counts. Never file paths (they carry usernames and
    folder structure), never audio, never the session contents.
 3. **The URL is a place to send data**, and it lives in a folder the
-   other person - and Dropbox - can write to. So it is validated against
+   other person - and Google Drive - can write to. So it is validated against
    Discord's own hosts before anything is posted. Without that, editing
    one file in the shared folder would silently redirect every sync
    notification to an arbitrary server.

@@ -1378,7 +1378,7 @@ class ReaperBackend(Backend):
         about audio quality.
 
         Falls back to the shared path rather than skipping the clip when
-        the copy can't be made. An arrangement playing from Dropbox is
+        the copy can't be made. An arrangement playing from Google Drive is
         the old behaviour and it works; an arrangement missing a clip is
         a hole the user has to notice and repair by hand. The warning is
         what makes the fallback honest.

@@ -282,7 +282,7 @@ footer .wrap { max-width: var(--measure); }
     </p>
     <p>
       DAWBridge gets around that. It keeps one copy of the song in a shared
-      Dropbox folder, in a format both programs understand. You take that copy
+      Google Drive folder, in a format both programs understand. You take that copy
       into whatever you use, do your thing, and send it back.
     </p>
     <p>
@@ -375,7 +375,7 @@ footer .wrap { max-width: var(--measure); }
 
     <ol class="steps">
       <li>
-        <p><strong>Install Dropbox and accept the folder invite.</strong></p>
+        <p><strong>Install Google Drive and accept the folder invite.</strong></p>
         <p>Then leave it alone until it finishes syncing. There's audio in
         there, so it can take a while. Starting before it's done is the most
         common way to see confusing errors.</p>
@@ -437,14 +437,14 @@ footer .wrap { max-width: var(--measure); }
     <ul class="plain">
       <li>Your project keeps working even if the shared folder gets moved,
       renamed, unshared, or you're just offline.</li>
-      <li>Your program isn't playing files out of a folder Dropbox is actively
+      <li>Your program isn't playing files out of a folder Google Drive is actively
       syncing underneath it.</li>
       <li>Your waveform files stay on your machine instead of being dumped into
       the shared folder, where they'd sync to everybody.</li>
     </ul>
     <p>
       To be clear about what this is <em>not</em>: audio doesn't get damaged or
-      lose quality by sitting in Dropbox. The file is identical either way.
+      lose quality by sitting in Google Drive. The file is identical either way.
       This is about it staying put and staying available.
     </p>
     <p>
@@ -471,7 +471,7 @@ footer .wrap { max-width: var(--measure); }
       playing. Forget it's open.</p></li>
       <li><p><strong>Save your project</strong> in your program. DAWBridge reads
       what's actually been saved, so unsaved work is a grey area.</p></li>
-      <li><p><strong>Push to Bridge.</strong> Then wait for Dropbox to finish
+      <li><p><strong>Push to Bridge.</strong> Then wait for Google Drive to finish
       syncing before you shut the laptop — the little tick in the system
       tray.</p></li>
     </ol>
@@ -513,16 +513,17 @@ footer .wrap { max-width: var(--measure); }
       </div>
       <div class="warn-item">
         <p class="said">clips reference audio missing from the shared folder</p>
-        <p>Usually just Dropbox not finished downloading. Check the tray icon,
+        <p>Usually just Google Drive not finished downloading. Check the tray icon,
         wait, try again. If it keeps saying it, the audio genuinely didn't make
         it up there.</p>
       </div>
       <div class="warn-item stop">
-        <p class="said">a "conflicted copy" was found</p>
+        <p class="said">unmerged publishes are sitting in this folder</p>
         <p><strong>Ask for help before doing anything else.</strong> Two people
-        pushed at nearly the same moment and Dropbox kept both files. One
-        version is sitting in a file nobody's reading — and it's the only copy
-        of somebody's work.</p>
+        pushed at nearly the same moment. Google Drive can&rsquo;t merge, so it
+        kept both &mdash; and one of them is sitting in a file nobody is
+        reading. That file is the only copy of somebody&rsquo;s work, and
+        normal Restore can&rsquo;t reach it.</p>
       </div>
     </div>
   </div>

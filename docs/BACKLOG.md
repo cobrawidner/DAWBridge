@@ -269,7 +269,7 @@ branch, which needs a Pro Tools that accepts a connection and then
 rejects the command.
 
 **Local audio, verified live 2026-09-06, Reaper 7.78.** Scratch project and
-scratch shared folder throughout; the real Dropbox folder was never touched.
+scratch shared folder throughout; the real Google Drive folder was never touched.
 
 - **Audio lands beside the project.** All three clips resolved to
   `<project>/Audio Files`, byte sizes matching the shared originals.
@@ -343,22 +343,22 @@ folder gets "nothing to do" and never migrates.
    "your partner's next push". Prose only, no behaviour change. Started
    2026-08-11, cut off by an API session limit before any edit.
 
-0b. **Reaper should use local copies of the audio, not the Dropbox files.**
+0b. **Reaper should use local copies of the audio, not the Google Drive files.**
    — **LANDED 2026-08-15**, together with a save prompt on the first pull
    into an unsaved project: the two are one feature, because an unsaved
    project has no folder to put the audio in. See `localmedia.py`.
    Not yet run against a live Reaper.
 
    *Approved 2026-08-11.* Pro Tools already copies audio into its own
-   session folder; Reaper references the shared Dropbox path directly. So a
+   session folder; Reaper references the shared Google Drive path directly. So a
    Reaper project breaks if the folder moves or goes offline, Reaper writes
    peak files into the shared folder, and the DAW streams from a
    cloud-synced directory during playback.
 
    **The reason matters, because a wrong one invites the wrong fix.** Audio
-   read from Dropbox is not degraded - the bytes are identical. The real
+   read from Google Drive is not degraded - the bytes are identical. The real
    problems are dropouts and latency reading from a synced folder,
-   cloud-only placeholder files the DAW expects to be local, Dropbox
+   cloud-only placeholder files the DAW expects to be local, Google Drive
    re-syncing a file the DAW holds open, and peak files polluting the
    shared store. Do not "fix" this by touching bit depth or format.
 
@@ -459,7 +459,7 @@ Recorded so nobody spends a session rediscovering the reasoning.
 - **Distribution is GitHub Releases, built by CI.** `git tag v0.x.0 &&
   git push origin v0.x.0` builds the exe on a Windows runner, runs the
   suite, and attaches the binary and QUICKSTART to a Release. Nobody
-  copies a build into Dropbox by hand. The repo is private, so the
+  copies a build into Google Drive by hand. The repo is private, so the
   collaborator must be added as a GitHub collaborator to download it.
 - **Discord notification config is shared, not per-machine.** It lives in
   `notify.json` in the shared folder, so both copies post to the channel
@@ -480,7 +480,7 @@ Recorded so nobody spends a session rediscovering the reasoning.
   shared folder can publish, so "your partner" is the wrong mental model
   and the wrong wording. Three consequences that are not just verbiage:
   the 20-revision archive fills roughly N times faster; simultaneous
-  publishes (and so Dropbox conflicted copies) get likelier with every
+  publishes (and so Google Drive conflicted copies) get likelier with every
   extra person; and `updated_by` records who published *last*, not who
   changed a given track - inferable with two people, guesswork with four.
 - **The damage in this codebase is quiet.** Almost every bug found has been an

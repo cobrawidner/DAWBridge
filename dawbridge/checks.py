@@ -6,7 +6,7 @@ disagreeing about whether a folder is healthy - which would be its own
 small disaster, since the whole point is to be believed.
 
 Everything here is read-only and **metadata-only**. The folder lives in
-Dropbox, where a file can be a cloud placeholder and reading it forces a
+Google Drive, where a file can be a cloud placeholder and reading it forces a
 download. Existence and size, never contents. A recursive read over this
 folder once began hydrating the user's entire account.
 """
@@ -45,7 +45,7 @@ def check_folder(store) -> tuple[list[str], list[tuple[str, int]]]:
     if missing:
         # Said every time, because the likeliest cause is the least
         # alarming one and people assume the worst about missing audio.
-        problems.append("missing audio can also just mean Dropbox hasn't finished "
+        problems.append("missing audio can also just mean Google Drive hasn't finished "
                         "syncing - check the sync icon before assuming it's lost")
 
     for track in session.tracks:

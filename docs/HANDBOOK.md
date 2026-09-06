@@ -10,7 +10,7 @@ Read it once and you're set.
 Some of us work in Reaper. Some in Pro Tools. Those two don't open each
 other's projects, and never will.
 
-DAWBridge gets around that. It keeps one copy of the song in a shared Dropbox
+DAWBridge gets around that. It keeps one copy of the song in a shared Google Drive
 folder, in a format both programs understand. You take that copy into whatever
 you use, do your thing, and send it back.
 
@@ -62,7 +62,7 @@ If you remember nothing else: **pull to get theirs, push to send yours.**
 
 ## Setting up — once, then never again
 
-1. **Install Dropbox and accept the folder invite.** Then leave it alone until
+1. **Install Google Drive and accept the folder invite.** Then leave it alone until
    it finishes syncing. There's audio in there, so it takes a while. Starting
    before it's done is the most common way to see confusing errors.
 
@@ -102,13 +102,13 @@ your project.** Three reasons that's worth a click:
 
 - Your project keeps working even if the shared folder is moved, renamed,
   unshared, or you're offline.
-- Your program isn't playing files out of a folder Dropbox is actively syncing
+- Your program isn't playing files out of a folder Google Drive is actively syncing
   underneath it.
 - Your waveform files stay on your machine instead of being dumped into the
   shared folder, where they'd sync to everybody.
 
 To be clear about what this is *not*: audio doesn't get damaged or lose quality
-by sitting in Dropbox. The file is identical either way. This is about it
+by sitting in Google Drive. The file is identical either way. This is about it
 staying put and staying available.
 
 You can say no. Everything still works and plays — the clips just read from the
@@ -125,7 +125,7 @@ Pro Tools already worked this way, so you'll only see this in Reaper.
 2. **Pull from Bridge.** Read the log — it says exactly what changed.
 3. **Work.** DAWBridge isn't doing anything while you play. Forget it's open.
 4. **Save your project** in your program. DAWBridge reads what's been saved.
-5. **Push to Bridge.** Then wait for Dropbox to finish syncing before you shut
+5. **Push to Bridge.** Then wait for Google Drive to finish syncing before you shut
    the laptop.
 
 There's no preview for pushing. The only thing worth checking before you push
@@ -153,13 +153,14 @@ Someone pushed in the few seconds it took to read your project. Nothing was
 written. Pull theirs, then push again.
 
 **"clips reference audio missing from the shared folder"**
-Usually just Dropbox not finished downloading. Check the tray icon, wait, try
+Usually just Google Drive not finished downloading. Check the tray icon, wait, try
 again. If it persists, the audio genuinely didn't make it up there.
 
-**"a conflicted copy was found"**
+**"unmerged publishes are sitting in this folder"**
 **Ask for help before doing anything else.** Two people pushed at nearly the
-same moment and Dropbox kept both files. One version is sitting in a file
-nobody's reading — and it's the only copy of somebody's work.
+same moment. Google Drive can't merge, so it kept both — and one of them is
+sitting in a file nobody is reading. That file is the only copy of somebody's
+work, and normal Restore can't reach it.
 
 ---
 

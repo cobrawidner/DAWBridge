@@ -33,7 +33,7 @@ def test_doctor_reports_missing_audio_and_who_needs_it(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "audio missing" in out
     assert "Lead Vocal/take_01" in out, "say which clip needs it, not just the filename"
-    assert "Dropbox hasn't finished syncing" in out, "the likeliest cause, not the scariest"
+    assert "Google Drive hasn't finished syncing" in out, "the likeliest cause, not the scariest"
 
 
 def test_doctor_finds_a_conflicted_copy(tmp_path, capsys):

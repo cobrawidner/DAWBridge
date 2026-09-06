@@ -143,7 +143,7 @@ def test_restore_archived_rejects_an_unknown_revision(tmp_path):
 
 def test_save_never_writes_a_revision_that_already_existed(tmp_path):
     # The partner published while this machine had the session open -
-    # ordinary on a Dropbox folder. Saving a stale in-memory session must
+    # ordinary on a Google Drive folder. Saving a stale in-memory session must
     # not re-issue a revision number canonical has already been past.
     store = SharedStore(tmp_path / "shared")
     store.save(Session(name="Theirs"), updated_by="them")
