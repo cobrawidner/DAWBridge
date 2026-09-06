@@ -103,12 +103,16 @@ if a Discord channel is set up (below), that message sends itself.
 
 ## Your first pull, and where the audio lives
 
-The first time you pull into a brand new project, DAWBridge asks you to save
-it. It suggests somewhere sensible — `Documents\DAWBridge\<project name>` —
-and you can put it anywhere you like except inside the shared folder.
+The first time you pull into a brand new project, DAWBridge asks whether you
+want to save it. Say yes and **Reaper** opens its own Save dialog — put the
+project anywhere you like except inside the shared folder.
 
-It asks because **your DAW keeps its own copy of the audio, in a folder
-beside the project.** That matters for three reasons:
+**Tick "Create subdirectory for project"** in that dialog. Reaper puts the
+audio in a folder next to the project, so saving straight onto your Desktop
+without this scatters an `Audio Files` folder across it.
+
+It asks because **your DAW keeps its own copy of the audio, beside the
+project.** That matters for three reasons:
 
 - Your project keeps working if the shared folder is moved, renamed,
   unshared, or simply offline.
@@ -121,9 +125,9 @@ To be clear about what this is *not*: audio read from Dropbox isn't damaged
 or lower quality — the file is identical either way. This is about the file
 staying put and staying available.
 
-You can click **Not now**. The pull still works and everything plays; the
-clips just read from the shared folder, and you'll get a warning in the log
-saying so. Save the project later and pull again, and the audio moves across
+You can say no, or cancel Reaper's dialog. The pull still works and
+everything plays; the clips just read from the shared folder, and the log
+says so. Save the project later and pull again, and the audio moves across
 on its own.
 
 Pro Tools has always worked this way — a Pro Tools session can't exist
