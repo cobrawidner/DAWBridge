@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DAWBridge Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+/* ── Palette taken from the app itself (dawbridge/theme.py): a piece of
+      studio outboard gear. Chassis grey-blue, hairline bevels, a dark
+      recessed readout with LED status ink, steel-blue accent, warm
+      orange brand mark used exactly twice. ───────────────────────────── */
+:root {
+  --ground:        #e9ecef;
+  --ground-2:      #dfe3e8;
+  --chassis:       #31363d;
+  --panel:         #3c424a;
+  --hair-d:        #22262b;
+  --rule:          #c5ccd4;
+  --ink:           #1c2126;
+  --ink-2:         #4d5760;
+  --ink-3:         #737f8a;
+  --accent:        #2f6094;
+  --accent-soft:   #dce7f2;
+  --brand:         #c96a2a;
+
+  /* The readout is a display, not a surface. Fixed in both themes -
+     a lit LCD looks the same whatever room it's in. */
+  --display:       #101315;
+  --display-edge:  #0a0c0d;
+  --read-ink:      #98a2a8;
+  --read-bright:   #dfe4e7;
+  --read-good:     #63c07a;
+  --read-warn:     #d9a83f;
+  --read-crit:     #cf5b4e;
+  --read-accent:   #6d9fd0;
+
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans:  "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono:  "IBM Plex Mono", "Consolas", "Courier New", monospace;
+
+  --measure: 34rem;
+  --shadow: 0 1px 2px rgba(20,26,32,.10), 0 6px 20px rgba(20,26,32,.07);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #1b1f24;
+    --ground-2:    #22262b;
+    --rule:        #363d45;
+    --ink:         #dfe3e7;
+    --ink-2:       #a8b0b8;
+    --ink-3:       #7c858f;
+    --accent:      #7fb0dc;
+    --accent-soft: #26333f;
+    --brand:       #e08a4a;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"] {
+  --ground:      #1b1f24;
+  --ground-2:    #22262b;
+  --rule:        #363d45;
+  --ink:         #dfe3e7;
+  --ink-2:       #a8b0b8;
+  --ink-3:       #7c858f;
+  --accent:      #7fb0dc;
+  --accent-soft: #26333f;
+  --brand:       #e08a4a;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.62;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: var(--measure); margin: 0 auto; padding: 0 1.5rem; }
+
+/* ── Front panel: the thing they're about to open ──────────────────── */
+.panel-head {
+  background: var(--chassis);
+  border-bottom: 1px solid var(--hair-d);
+  padding: 2.6rem 0 2.2rem;
+}
+.panel-head .wrap { max-width: 46rem; }
+.brandline { display: flex; align-items: center; gap: .85rem; margin-bottom: 1.6rem; }
+.mark {
+  width: 30px; height: 30px; border-radius: 3px; flex: none;
+  background: #0e1114;
+  display: grid; place-items: center;
+  box-shadow: inset 0 0 0 1px #0a0c0d, 0 1px 0 #525a64;
+}
+.mark span {
+  display: block; width: 13px; height: 13px;
+  background: linear-gradient(135deg, var(--brand) 0 50%, #e2e7ea 50% 100%);
+  transform: rotate(45deg);
+}
+.wordmark {
+  font-family: var(--sans); font-weight: 700; font-size: 1.15rem;
+  letter-spacing: .01em; color: #dfe3e7;
+}
+.panel-head h1 {
+  font-family: var(--sans); font-weight: 600;
+  font-size: clamp(1.9rem, 5.2vw, 2.7rem); line-height: 1.12;
+  color: #f0f3f5; margin: 0 0 .7rem; text-wrap: balance;
+}
+.panel-head .standfirst {
+  color: #b6bec6; font-size: 1.08rem; margin: 0; max-width: 32rem;
+}
+
+/* ── The readout: anything the app itself says ─────────────────────── */
+.readout {
+  background: var(--display);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--display-edge), inset 0 1px 6px rgba(0,0,0,.6);
+  font-family: var(--mono); font-size: .82rem; line-height: 1.75;
+  color: var(--read-ink);
+  padding: .95rem 1.1rem;
+  overflow-x: auto;
+}
+.readout b { color: var(--read-bright); font-weight: 500; }
+.readout .good { color: var(--read-good); }
+.readout .warn { color: var(--read-warn); }
+.readout .crit { color: var(--read-crit); }
+.readout .dim  { color: #626d74; }
+
+/* ── Sections ──────────────────────────────────────────────────────── */
+section { padding: 3.2rem 0 .6rem; }
+section + section { border-top: 1px solid var(--rule); }
+
+.eyebrow {
+  font-family: var(--sans); font-size: .7rem; font-weight: 600;
+  letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-3); margin: 0 0 .6rem;
+}
+h2 {
+  font-family: var(--sans); font-weight: 600;
+  font-size: clamp(1.45rem, 3.6vw, 1.85rem); line-height: 1.18;
+  margin: 0 0 1rem; text-wrap: balance; color: var(--ink);
+}
+h3 {
+  font-family: var(--sans); font-weight: 600; font-size: 1.02rem;
+  letter-spacing: .005em; margin: 2rem 0 .5rem; color: var(--ink);
+}
+p { margin: 0 0 1.05rem; }
+strong { font-weight: 600; }
+a { color: var(--accent); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+.lede { font-size: 1.12rem; color: var(--ink-2); }
+
+/* The single most important sentence in the document. */
+.thesis {
+  font-family: var(--sans); font-weight: 600;
+  font-size: clamp(1.2rem, 3.4vw, 1.5rem); line-height: 1.32;
+  color: var(--ink); margin: 1.4rem 0;
+  padding-left: 1.1rem; border-left: 3px solid var(--brand);
+  text-wrap: balance;
+}
+
+/* ── Button plates: raised, bevelled, like the real ones ───────────── */
+.plates { display: grid; gap: .7rem; margin: 1.6rem 0 .4rem; }
+.plate {
+  display: grid; grid-template-columns: minmax(0,10.5rem) 1fr; gap: 0 1.2rem;
+  align-items: start;
+  background: var(--ground-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: .85rem 1rem;
+}
+.plate .key {
+  font-family: var(--sans); font-weight: 600; font-size: .88rem;
+  color: var(--ink); align-self: center;
+  padding: .3rem .6rem; border-radius: 3px;
+  background: var(--ground);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 1px 1px rgba(20,26,32,.14);
+  text-align: center;
+}
+:root[data-theme="dark"] .plate .key,
+:root:not([data-theme="light"]) .plate .key { box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 1px 1px rgba(0,0,0,.4); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .plate .key { box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 1px 1px rgba(20,26,32,.14); } }
+.plate .what { font-size: .96rem; color: var(--ink-2); align-self: center; }
+.plate.safe { border-left: 3px solid var(--read-good); }
+.plate.changes { border-left: 3px solid var(--brand); }
+
+@media (max-width: 33rem) {
+  .plate { grid-template-columns: 1fr; gap: .5rem; }
+  .plate .key { justify-self: start; }
+}
+
+/* ── Numbered setup: a real sequence, so numbers are honest here ───── */
+ol.steps { list-style: none; counter-reset: s; margin: 1.4rem 0; padding: 0; display: grid; gap: 1.5rem; }
+ol.steps > li { counter-increment: s; display: grid; grid-template-columns: 2rem 1fr; gap: 0 1rem; }
+ol.steps > li::before {
+  content: counter(s);
+  font-family: var(--sans); font-weight: 700; font-size: .95rem;
+  color: var(--accent);
+  border-top: 2px solid var(--accent);
+  padding-top: .35rem;
+}
+ol.steps > li > *:first-child { margin-top: .1rem; }
+ol.steps p:last-child { margin-bottom: 0; }
+
+ul.plain { margin: 0 0 1.1rem; padding-left: 1.15rem; }
+ul.plain li { margin-bottom: .5rem; }
+
+/* ── Warnings: severity stripe, not a card ─────────────────────────── */
+.warnings { display: grid; gap: 1.4rem; margin: 1.5rem 0; }
+.warn-item { display: grid; gap: .6rem; }
+.warn-item .said {
+  font-family: var(--mono); font-size: .84rem; line-height: 1.5;
+  color: var(--ink); background: var(--accent-soft);
+  border-left: 3px solid var(--read-warn);
+  padding: .6rem .85rem; border-radius: 0 3px 3px 0;
+}
+.warn-item.stop .said { border-left-color: var(--read-crit); }
+.warn-item p { margin: 0; font-size: .97rem; }
+
+.aside {
+  background: var(--ground-2); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 1rem 1.15rem; margin: 1.5rem 0;
+  font-size: .95rem; color: var(--ink-2);
+}
+.aside p:last-child { margin-bottom: 0; }
+.aside .label {
+  font-family: var(--sans); font-size: .68rem; font-weight: 600;
+  letter-spacing: .15em; text-transform: uppercase; color: var(--ink-3);
+  display: block; margin-bottom: .4rem;
+}
+
+footer {
+  border-top: 1px solid var(--rule); margin-top: 3rem;
+  padding: 2rem 0 3.5rem; color: var(--ink-3); font-size: .92rem;
+}
+footer .wrap { max-width: var(--measure); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="panel-head">
+  <div class="wrap">
+    <div class="brandline">
+      <span class="mark" aria-hidden="true"><span></span></span>
+      <span class="wordmark">DAWBridge</span>
+    </div>
+    <h1>Everything you need to know, in about ten minutes</h1>
+    <p class="standfirst">
+      How to work on the same song as everyone else, without anyone losing
+      a take. Read it once and you're set.
+    </p>
+  </div>
+</header>
+
+<main>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">What this is</p>
+    <h2>One song, different programs</h2>
+    <p class="lede">
+      Some of us work in Reaper. Some in Pro Tools. Those two don't open each
+      other's projects, and never will.
+    </p>
+    <p>
+      DAWBridge gets around that. It keeps one copy of the song in a shared
+      Dropbox folder, in a format both programs understand. You take that copy
+      into whatever you use, do your thing, and send it back.
+    </p>
+    <p>
+      It carries <strong>tracks, audio clips, where they sit on the timeline,
+      track names, track colours, the tempo, and markers.</strong> That's the
+      arrangement — the actual song. Your plugins, your mix, your routing stay
+      on your machine, because those don't translate between programs anyway.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">The one idea</p>
+    <h2>The shared folder is the real song</h2>
+    <p>
+      Picture a whiteboard in the practice room that everyone can see. You copy
+      what's on it into your notebook, work on it, then copy your version back
+      up onto the board.
+    </p>
+    <p class="thesis">
+      Copy the board first. Work second. Put yours back last.
+    </p>
+    <p>
+      That order is the whole thing. If you put yours back <em>without</em>
+      copying the board first, you wipe out whatever anyone else added while you
+      were gone. There's no clever merging — the last person to write on the
+      board wins.
+    </p>
+    <p>
+      DAWBridge will stop you and ask before that happens. But it's much easier
+      to just do it in the right order.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">The window</p>
+    <h2>Seven buttons, and only two that matter</h2>
+    <p>
+      The buttons run left to right in the order you actually use them. There's
+      a groove down the middle: everything to the <strong>left of the groove
+      changes something</strong>, everything to the <strong>right just
+      looks</strong>.
+    </p>
+
+    <div class="plates">
+      <div class="plate changes">
+        <span class="key">Pull from Bridge</span>
+        <span class="what">Brings everyone else's work <strong>into</strong> your program. Do this first, every single time.</span>
+      </div>
+      <div class="plate changes">
+        <span class="key">Push to Bridge</span>
+        <span class="what">Sends <strong>your</strong> version out to the shared folder. Do this when you're done.</span>
+      </div>
+      <div class="plate safe">
+        <span class="key">Preview pull</span>
+        <span class="what">Shows exactly what a pull would change, and changes nothing. Free to click as often as you like.</span>
+      </div>
+      <div class="plate safe">
+        <span class="key">Refresh status</span>
+        <span class="what">Re-reads the shared folder and tells you what's in it right now.</span>
+      </div>
+      <div class="plate safe">
+        <span class="key">Check folder</span>
+        <span class="what">Looks for trouble — missing audio, duplicate files, overlapping clips. Changes nothing.</span>
+      </div>
+      <div class="plate safe">
+        <span class="key">History…</span>
+        <span class="what">The last 20 versions of the song, who saved each one, and a button to put an old one back.</span>
+      </div>
+      <div class="plate safe">
+        <span class="key">Notifications…</span>
+        <span class="what">Set up a Discord channel that gets a message whenever anyone pulls or pushes.</span>
+      </div>
+    </div>
+
+    <p style="margin-top:1.4rem">
+      If you remember nothing else from this whole page:
+      <strong>pull to get theirs, push to send yours.</strong>
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Setting up · once, then never again</p>
+    <h2>Getting started</h2>
+
+    <ol class="steps">
+      <li>
+        <p><strong>Install Dropbox and accept the folder invite.</strong></p>
+        <p>Then leave it alone until it finishes syncing. There's audio in
+        there, so it can take a while. Starting before it's done is the most
+        common way to see confusing errors.</p>
+      </li>
+      <li>
+        <p><strong>Reaper only: install Python once.</strong></p>
+        <p>Reaper needs it before it can talk to DAWBridge. It's a download and
+        two commands, about five minutes, and you never touch it again. The
+        steps are in <strong>REAPER_SETUP.md</strong>, posted alongside this.</p>
+        <p>Pro Tools people: nothing to do. Skip this.</p>
+      </li>
+      <li>
+        <p><strong>Open your program and open the song.</strong></p>
+        <p>DAWBridge talks to whatever project is open right now, so make sure
+        it's the right one. Joining a song for the first time? There's nothing
+        to open yet — start a new empty project and pull into that.</p>
+      </li>
+      <li>
+        <p><strong>Run DAWBridge.exe.</strong></p>
+        <p>Nothing to install. It's one file — double-click it.</p>
+      </li>
+      <li>
+        <p><strong>Point it at the folder.</strong></p>
+        <p>Click <strong>Browse…</strong> and pick the shared folder — the one
+        whose name ends in <code>.dawbridge</code>.</p>
+      </li>
+      <li>
+        <p><strong>Pick your program and type your name.</strong></p>
+        <p>The name is optional but please do it. Without it, every version you
+        save is credited to "gui@reaper" — and when someone's trying to work out
+        which version to go back to at 2am, that's who they'll be looking at.</p>
+      </li>
+    </ol>
+
+    <p>It remembers all of that next time.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">First pull on a new song</p>
+    <h2>Where your audio lives</h2>
+    <p>
+      The first time you pull into a brand new project, DAWBridge asks if you
+      want to save it. Say yes — <strong>Reaper</strong> then opens its own Save
+      box. Put the project anywhere you like, except inside the shared folder.
+    </p>
+
+    <div class="aside">
+      <span class="label">Worth doing</span>
+      <p>Tick <strong>"Create subdirectory for project"</strong> in that Save
+      box. Your audio goes in a folder next to the project, so saving straight
+      onto your Desktop without ticking it scatters an "Audio Files" folder
+      across your Desktop.</p>
+    </div>
+
+    <p>It asks because <strong>your program keeps its own copy of the audio,
+    right next to your project.</strong> Three reasons that's worth a click:</p>
+    <ul class="plain">
+      <li>Your project keeps working even if the shared folder gets moved,
+      renamed, unshared, or you're just offline.</li>
+      <li>Your program isn't playing files out of a folder Dropbox is actively
+      syncing underneath it.</li>
+      <li>Your waveform files stay on your machine instead of being dumped into
+      the shared folder, where they'd sync to everybody.</li>
+    </ul>
+    <p>
+      To be clear about what this is <em>not</em>: audio doesn't get damaged or
+      lose quality by sitting in Dropbox. The file is identical either way.
+      This is about it staying put and staying available.
+    </p>
+    <p>
+      You can say no. Everything still works and plays — the clips just read
+      from the shared folder, and the log tells you so. Save the project later
+      and pull again, and the audio moves across on its own.
+    </p>
+    <p>
+      Pro Tools already worked this way, so you'll only ever see this in Reaper.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Every time after that</p>
+    <h2>A normal session</h2>
+    <ol class="steps">
+      <li><p><strong>Preview pull</strong>, if you want to see what's waiting
+      before you take it. Changes nothing.</p></li>
+      <li><p><strong>Pull from Bridge.</strong> Read the log afterwards — it
+      tells you exactly what changed.</p></li>
+      <li><p><strong>Work.</strong> DAWBridge isn't doing anything while you're
+      playing. Forget it's open.</p></li>
+      <li><p><strong>Save your project</strong> in your program. DAWBridge reads
+      what's actually been saved, so unsaved work is a grey area.</p></li>
+      <li><p><strong>Push to Bridge.</strong> Then wait for Dropbox to finish
+      syncing before you shut the laptop — the little tick in the system
+      tray.</p></li>
+    </ol>
+    <p>
+      There's no preview for pushing. The only thing worth checking before you
+      push is that you pulled first.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">When it interrupts you</p>
+    <h2>What the warnings mean</h2>
+    <p>
+      DAWBridge would rather stop and ask than guess. Every one of these means
+      somebody's work is genuinely at risk, so they're worth reading rather than
+      clicking past.
+    </p>
+
+    <div class="warnings">
+      <div class="warn-item stop">
+        <p class="said">someone else has published since your last sync</p>
+        <p><strong>Stop.</strong> Somebody pushed while you were working. Carry
+        on and your version replaces theirs, and theirs is gone from the folder.
+        What you almost certainly want: cancel, <strong>Pull from Bridge</strong>
+        to get their work, check yours is still there, then push.</p>
+      </div>
+      <div class="warn-item">
+        <p class="said">this DAW has a different project open than your last sync</p>
+        <p>You've got a different song open than last time. Pushing would
+        replace the shared song with <em>this</em> one. Fine if you meant to
+        switch — otherwise open the right project first.</p>
+      </div>
+      <div class="warn-item">
+        <p class="said">the shared session moved while your DAW was being read</p>
+        <p>Someone pushed in the few seconds it took to read your project.
+        Nothing was written. Pull theirs, then push again.</p>
+      </div>
+      <div class="warn-item">
+        <p class="said">clips reference audio missing from the shared folder</p>
+        <p>Usually just Dropbox not finished downloading. Check the tray icon,
+        wait, try again. If it keeps saying it, the audio genuinely didn't make
+        it up there.</p>
+      </div>
+      <div class="warn-item stop">
+        <p class="said">a "conflicted copy" was found</p>
+        <p><strong>Ask for help before doing anything else.</strong> Two people
+        pushed at nearly the same moment and Dropbox kept both files. One
+        version is sitting in a file nobody's reading — and it's the only copy
+        of somebody's work.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">When it goes wrong anyway</p>
+    <h2>Nothing is one click from gone</h2>
+    <p>
+      <strong>The shared folder keeps the last 20 versions.</strong> That
+      includes the one you just pushed over the top of. This is the thing to
+      remember when a warning pops up and you're not sure — it's recoverable,
+      so stop and ask rather than guessing.
+    </p>
+    <p>
+      <strong>Check folder</strong> tells you whether anything's wrong.
+      <strong>History…</strong> lists the last 20 versions — who saved each one,
+      when, and how many tracks it had — with a Restore button.
+    </p>
+    <p>
+      Restoring publishes the old version as a <em>new</em> one. It doesn't
+      rewind. That's deliberate: it means everyone else's copy notices the
+      change, and the version you replaced is kept too, so an unwanted restore
+      can itself be undone. It only touches the shared folder — use
+      <strong>Pull from Bridge</strong> afterwards to get it into your program.
+    </p>
+    <p>
+      Still stuck? Message Travis and say what happened and roughly when. The
+      log window is the useful bit — copy the text out of it.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Optional</p>
+    <h2>Let the channel know for you</h2>
+    <p>
+      DAWBridge can post to Discord every time anyone pulls or pushes, so nobody
+      has to remember to say so. Messages look like this:
+    </p>
+    <div class="readout">
+      <b>Dead Flowers</b> <span class="dim">—</span> Conner published <b>r37</b> from Pro Tools — 14 track(s), 62 clip(s)<br>
+      <span class="dim">Pull from Bridge to pick it up.</span>
+    </div>
+    <p style="margin-top:1.2rem">
+      In Discord: <strong>Server Settings → Integrations → Webhooks → New
+      Webhook</strong>, pick a channel, copy the URL. Then in DAWBridge click
+      <strong>Notifications…</strong>, paste it, and press
+      <strong>Save and send test</strong>.
+    </p>
+    <p>
+      <strong>One person sets this up and everybody's copy starts posting</strong>
+      — the setting lives in the shared folder, so nobody else has to do
+      anything. A channel only some of you reach is worse than none.
+    </p>
+    <p>
+      Messages say who, which program, the version number, and how many tracks
+      and clips. They never include file paths, audio, or anything from inside
+      your session. If Discord's down, your sync still works fine and the log
+      says so.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Being straight with you</p>
+    <h2>What doesn't cross yet</h2>
+    <p>So none of this surprises you halfway through a session:</p>
+    <ul class="plain">
+      <li><strong>Reaper regions don't cross.</strong> Markers do. A region has
+      a start and an end and there's nowhere to put the end, so rather than
+      quietly flattening it to a single point you get a warning.</li>
+      <li><strong>Time signature is read but not applied.</strong> If the song
+      isn't in 4/4, set the meter yourself on the receiving side. The tempo does
+      cross.</li>
+      <li><strong>Fades come in but don't go back out.</strong> A crossfade you
+      create may not survive being pushed.</li>
+      <li><strong>In Pro Tools, clips that already exist don't get moved</strong>
+      by a pull. New clips arrive correctly. If the preview says a clip moved
+      and it didn't, that's this.</li>
+      <li><strong>Plugins, automation, mixer settings and routing stay on your
+      machine.</strong> Always. This syncs the arrangement, not the mix.</li>
+    </ul>
+    <div class="aside">
+      <span class="label">The important part</span>
+      <p>DAWBridge never deletes anything in your project. The worst it does to
+      <em>your</em> session is add things. All the risk sits on the shared
+      folder — which is exactly why the warnings are worth reading.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p style="margin:0">
+      DAWBridge v0.1.4 · Reaper and Pro Tools · Windows<br>
+      Reaper setup instructions are in REAPER_SETUP.md.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
