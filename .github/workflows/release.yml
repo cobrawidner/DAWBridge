@@ -25,6 +25,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history and tags. The default shallow clone has neither,
+          # so the changelog below would have nothing to compare against.
+          fetch-depth: 0
+
 
       - uses: actions/setup-python@v5
         with:
@@ -123,7 +128,34 @@ jobs:
           }
           $tag = "${{ github.ref_name }}"
           $link = "https://github.com/${{ github.repository }}/releases/tag/$tag"
-          $text = "**DAWBridge $tag** is out. Download DAWBridge.exe from the release page, then run it - there is nothing to install.`n$link"
+
+          # What changed, straight from the commit subjects. Nothing to
+          # maintain by hand, and nothing filtered out - a clever filter
+          # that hides a real change is worse than a line of noise. If a
+          # release reads badly in Discord, the fix is better commit
+          # subjects, which is the same thing that makes `git log` useful.
+          $prev = git describe --tags --abbrev=0 "$tag^" 2>$null
+          if ($LASTEXITCODE -eq 0 -and $prev) {
+            $subjects = @(git log "$prev..$tag" --no-merges --pretty=format:%s)
+          } else {
+            $subjects = @(git log $tag --no-merges --pretty=format:%s -n 15)   # first release
+          }
+          $LASTEXITCODE = 0
+
+          # Discord rejects anything over 2000 characters outright, so the
+          # list is capped by BOTH line count and length - a release with
+          # 60 commits would otherwise fail to post at all.
+          $shown, $used, $room = @(), 0, 1400
+          foreach ($s in $subjects) {
+            if ($shown.Count -ge 15 -or ($used + $s.Length + 3) -gt $room) { break }
+            $shown += $s; $used += $s.Length + 3
+          }
+          $more = $subjects.Count - $shown.Count
+
+          $body = ($shown | ForEach-Object { "- $_" }) -join "`n"
+          if ($more -gt 0) { $body += "`n- ...and $more more" }
+
+          $text = "**DAWBridge $tag** is out.`n`n$body`n`nDownload DAWBridge.exe from the release page - there is nothing to install.`n$link"
           # Assembled rather than ConvertTo-Json'd whole, so allowed_mentions
           # is guaranteed to serialise as [] - PowerShell turns an empty
           # array into an empty string, and Discord would then treat the
