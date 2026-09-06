@@ -268,6 +268,43 @@ Not exercised live: the `unavailable_reason` "running but refused"
 branch, which needs a Pro Tools that accepts a connection and then
 rejects the command.
 
+**Local audio, verified live 2026-09-06, Reaper 7.78.** Scratch project and
+scratch shared folder throughout; the real Dropbox folder was never touched.
+
+- **Audio lands beside the project.** All three clips resolved to
+  `<project>/Audio Files`, byte sizes matching the shared originals.
+- **Projects already pointing at the shared folder migrate themselves.**
+  Two clips created by an earlier pull pointed into the shared folder;
+  the next pull re-pointed both to local copies with nothing written for
+  the purpose.
+- **Peak files follow the project.** Reaper created `Audio Files/peaks`
+  beside the project. The shared folder had also collected a `peaks`
+  directory earlier, from the pull made while the project was unsaved -
+  the pollution this feature exists to stop, caught in the act.
+- **Republishing duplicates nothing.** A push with no edits reported "no
+  changes" and added no files to the shared `audio/`.
+- **A re-record is still noticed.** An existing tagged clip re-pointed at
+  different audio published as "1 track updated" and imported the new
+  file. This is the one that mattered: `should_reimport_audio` short-
+  circuits on filename, and had that been too eager it would have
+  published a replaced take as no change at all.
+
+**Found while testing, still open:** `Main_SaveProjectEx` does not save
+silently - it opens Reaper's own modal Save dialog and blocks until
+someone answers it. Reaper's main window is disabled meanwhile, so
+DAWBridge sits with every button greyed and no explanation, and the
+dialog can be behind the Reaper window. `save_project_as` verifies by
+reading the path back, so it correctly refused and warned rather than
+copying audio somewhere wrong - but the flow needs rethinking. Likely
+answer: drop DAWBridge's own "where shall I save it?" dialog and either
+let Reaper prompt (one native dialog, not two) or just tell the user to
+save in Reaper first. Whether clicking Save in that dialog completes the
+flow is UNTESTED - the run was cancelled.
+
+**Also open, minor:** migration only happens when a pull has other work
+to do. A project that is fully in sync but still pointing at the shared
+folder gets "nothing to do" and never migrates.
+
 ## Queued work
 
 00. **Verify the bundled Reaper runtime against a live Reaper.** *Blocking
