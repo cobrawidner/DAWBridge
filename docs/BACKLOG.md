@@ -289,17 +289,26 @@ scratch shared folder throughout; the real Dropbox folder was never touched.
   circuits on filename, and had that been too eager it would have
   published a replaced take as no change at all.
 
-**Found while testing, still open:** `Main_SaveProjectEx` does not save
-silently - it opens Reaper's own modal Save dialog and blocks until
-someone answers it. Reaper's main window is disabled meanwhile, so
-DAWBridge sits with every button greyed and no explanation, and the
-dialog can be behind the Reaper window. `save_project_as` verifies by
-reading the path back, so it correctly refused and warned rather than
-copying audio somewhere wrong - but the flow needs rethinking. Likely
-answer: drop DAWBridge's own "where shall I save it?" dialog and either
-let Reaper prompt (one native dialog, not two) or just tell the user to
-save in Reaper first. Whether clicking Save in that dialog completes the
-flow is UNTESTED - the run was cancelled.
+**The save step, resolved 2026-09-06.** `Main_SaveProjectEx` was wrong
+twice over, both confirmed live: it ignores the filename passed to it
+(Reaper opens an EMPTY Save dialog - spotted by Travis, "its not
+pre-filled"), and it returns immediately instead of blocking, so reading
+the path back on the next line always found nothing and the verification
+always reported failure - while the project sat saved on the Desktop.
+
+Replaced by `prompt_save_project()`: raise Reaper's own dialog with
+`Main_SaveProject(forceSaveAs)` and poll for the path against a
+deadline. DAWBridge's own "where shall I save it?" box is gone - it was
+collecting an answer that could never be honoured, and showing two
+dialogs where one would do.
+
+Verified live end to end: Reaper prompted, DAWBridge waited, project
+saved to `Desktop/testsave.rpp`, and all three clips resolved to
+`Desktop/Audio Files` with peaks alongside. local: 3, shared: 0.
+
+Worth knowing for the quickstart: Reaper's Save dialog has a "Create
+subdirectory for project" checkbox. Unticked, saving to a folder like
+the Desktop drops `Audio Files` and `peaks` straight into it.
 
 **Also open, minor:** migration only happens when a pull has other work
 to do. A project that is fully in sync but still pointing at the shared
