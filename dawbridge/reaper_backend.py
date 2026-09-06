@@ -681,36 +681,62 @@ class ReaperBackend(Backend):
         """
         return self.project_identity()
 
-    def save_project_as(self, path) -> str:
-        """Save the open project to `path`. Returns where it actually landed.
+    #: How long to leave Reaper's Save dialog open before giving up. This
+    #: is a person choosing a folder and typing a name, not a machine, so
+    #: it is generous. Cancelling is detected the same way as a timeout -
+    #: neither produces a saved project, and nothing downstream cares
+    #: which it was.
+    save_prompt_seconds = 180
 
-        Verifies by reading the path back rather than trusting the call.
-        `Main_SaveProjectEx` is a relatively recent ReaScript addition and
-        reapy passes arguments through by position, so a version mismatch
-        would fail quietly - and the caller is about to copy gigabytes of
-        audio next to wherever this claims the project is. A silent
-        no-save would scatter that beside the *old* location, or nowhere.
+    def prompt_save_project(self, poll_seconds: float = 0.5) -> str:
+        """Ask Reaper to save the open project, and wait for the answer.
+
+        Returns where it landed, or raises with a sentence for the user.
+
+        **Do not go back to `Main_SaveProjectEx(0, path, 0)`.** It was
+        tried, and it fails in two ways at once, both confirmed live:
+
+          1. It ignores the filename. Reaper opens an empty Save dialog,
+             so the path DAWBridge carefully asked the user for is
+             discarded - which made DAWBridge's own "where shall I save
+             it?" box worse than redundant, since it collected an answer
+             it then threw away.
+          2. It returns immediately rather than blocking. Reading the
+             project path back on the next line therefore always found
+             nothing, and the verification always reported "the save did
+             not happen" - even when the user had saved perfectly well a
+             few seconds later. Observed exactly that: the warning fired,
+             and the project was on the Desktop the whole time.
+
+        So the dialog is Reaper's and the waiting is ours. `Main_SaveProject`
+        with `forceSaveAs` is the documented way to raise it - preferred
+        over a raw action id, which would be a number nobody could check.
         """
+        import time
+
         from reapy import reascript_api as RPR
 
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        before = self.project_file()
         try:
-            RPR.Main_SaveProjectEx(0, str(path), 0)
+            RPR.Main_SaveProject(0, True)
         except Exception as exc:
             raise RuntimeError(
-                f"Reaper would not save the project to {path} ({exc}). Save it yourself in "
-                f"Reaper (File -> Save project as...), then pull again."
+                f"Reaper would not open its Save dialog ({exc}). Save the project yourself "
+                f"in Reaper (File -> Save project as...), then pull again."
             ) from exc
 
-        landed = self.project_file()
-        if not landed:
-            raise RuntimeError(
-                f"Reaper reported no project file after being asked to save to {path}, so the "
-                f"save did not happen. Save it yourself in Reaper (File -> Save project as...), "
-                f"then pull again."
-            )
-        return landed
+        deadline = time.monotonic() + self.save_prompt_seconds
+        while time.monotonic() < deadline:
+            landed = self.project_file()
+            if landed and landed != before:
+                return landed
+            time.sleep(poll_seconds)
+
+        raise RuntimeError(
+            "the project still isn't saved - the Save dialog was cancelled, or it is "
+            "still open. Nothing was changed by this. Save the project in Reaper and "
+            "pull again to keep the audio alongside it."
+        )
 
     # ---- read: what's in Reaper right now ------------------------------
 

@@ -282,18 +282,21 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
 
 def _save_project_if_asked(backend, folder: Path, requested) -> None:
-    """Save the DAW's project before its audio is copied beside it.
+    """Get the DAW's project onto disk before its audio is copied beside it.
 
-    The GUI can offer a dialog; a command line cannot interrupt a
-    scripted run to ask, so this only acts when `--save-project-as` said
-    where to put it. Without the flag it prints what an unsaved project
-    costs and carries on - `apply()` warns too, but by then the audio is
-    already pointing at the shared folder and the advice arrives too late
-    to act on.
+    `requested` is only a flag saying the user WANTS to save - the path
+    they gave is no longer used, because Reaper's Save dialog ignores a
+    supplied filename (see ReaperBackend.prompt_save_project). Keeping
+    the flag rather than the path means an existing command line still
+    works and still means the same thing.
+
+    Without the flag it prints what an unsaved project costs and carries
+    on. `apply()` warns too, but by then the audio is already pointing at
+    the shared folder and the advice arrives too late to act on.
     """
     probe = getattr(backend, "project_file", None)
-    saver = getattr(backend, "save_project_as", None)
-    if probe is None or saver is None:
+    prompt = getattr(backend, "prompt_save_project", None)
+    if probe is None or prompt is None:
         return  # a Pro Tools session always has a path
     try:
         if probe():
@@ -303,17 +306,14 @@ def _save_project_if_asked(backend, folder: Path, requested) -> None:
         return
 
     if not requested:
-        suggested = localmedia.default_project_file(
-            notify.project_name(folder),
-            extension=getattr(backend, "project_extension", ".rpp"),
-        )
-        print(f"[dawbridge] this project has never been saved, so its audio will play from "
-              f"the shared folder. To keep a local copy instead, re-run with:")
-        print(f"             --save-project-as \"{suggested}\"")
+        print("[dawbridge] this project has never been saved, so its audio will play from "
+              "the shared folder. To keep a local copy instead, save the project in Reaper "
+              "first, or re-run with --save-project.")
         return
 
+    print("[dawbridge] Reaper is asking where to save this project - answer it there.")
     try:
-        landed = saver(requested)
+        landed = prompt()
     except Exception as exc:  # noqa: BLE001 - reported, never raised at the user
         print(f"[dawbridge][warning] {exc}")
         return
@@ -359,7 +359,7 @@ def cmd_load(args: argparse.Namespace) -> int:
         return 0
 
     print()
-    _save_project_if_asked(backend, Path(args.folder), getattr(args, "save_project_as", None))
+    _save_project_if_asked(backend, Path(args.folder), getattr(args, "save_project", False))
     warnings = backend.apply(session, store)
     syncstate.record_sync(Path(args.folder), args.daw, session.revision, "load", project)
     print(f"[dawbridge] loaded session revision {session.revision} into {args.daw}.")
@@ -531,15 +531,16 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "pull":
             p.add_argument("--dry-run", action="store_true",
                            help="show what would change, then stop without touching the DAW")
-            p.add_argument("--save-project-as", metavar="PATH",
-                           help="if the DAW's project has never been saved, save it here first, "
-                                "so the audio can be copied beside it instead of played from "
-                                "the shared folder (Reaper only; ignored if already saved)")
+            p.add_argument("--save-project", action="store_true",
+                           help="if the DAW's project has never been saved, have Reaper ask "
+                                "where to save it first, so the audio can be copied beside it "
+                                "instead of played from the shared folder (Reaper only; "
+                                "ignored if the project is already saved)")
         if name == "push":
             p.add_argument("--force", action="store_true",
                            help="publish even though someone else published since you last synced, "
                                 "replacing their changes")
-        p.set_defaults(func=fn, dry_run=False, force=False, save_project_as=None)
+        p.set_defaults(func=fn, dry_run=False, force=False, save_project=False)
 
     for name, fn in (("status", cmd_status), ("history", cmd_history), ("doctor", cmd_doctor)):
         p = sub.add_parser(name)

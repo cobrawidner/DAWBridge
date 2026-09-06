@@ -72,78 +72,88 @@ def test_a_failed_copy_warns_and_still_yields_playable_audio(tmp_path):
 # ---- the CLI save step -------------------------------------------------
 
 class _Reaper:
-    """Stands in for a Reaper with nothing saved yet."""
+    """Stands in for a Reaper with nothing saved yet.
+
+    Note there is no path parameter on the prompt. Reaper's Save dialog
+    ignores a supplied filename - confirmed live, it opens empty - so
+    DAWBridge no longer pretends to choose one.
+    """
 
     project_extension = ".rpp"
 
-    def __init__(self, saved: str = "", fail: bool = False):
-        self._saved, self._fail = saved, fail
-        self.asked_to_save = None
+    def __init__(self, saved: str = "", fail: bool = False, lands: str = r"C:\chosen\Song.rpp"):
+        self._saved, self._fail, self._lands = saved, fail, lands
+        self.was_prompted = False
 
     def project_file(self):
         return self._saved
 
-    def save_project_as(self, path):
-        self.asked_to_save = path
+    def prompt_save_project(self):
+        self.was_prompted = True
         if self._fail:
-            raise RuntimeError("Reaper would not save the project")
-        self._saved = str(path)
+            raise RuntimeError("the project still isn't saved - the Save dialog was cancelled")
+        self._saved = self._lands
         return self._saved
 
 
 class _ProTools:
-    """No project_file/save_project_as: a session always has a path."""
+    """No project_file/prompt_save_project: a session always has a path."""
 
 
-def test_an_unsaved_project_is_saved_where_asked(tmp_path, capsys):
+def test_an_unsaved_project_gets_reapers_own_save_prompt(tmp_path, capsys):
     backend = _Reaper()
-    target = tmp_path / "Song.rpp"
 
-    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", str(target))
+    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", True)
 
-    assert backend.asked_to_save == str(target)
-    assert "Audio Files" in capsys.readouterr().out
+    assert backend.was_prompted
+    out = capsys.readouterr().out
+    assert "asking where to save" in out
+    assert "Audio Files" in out          # and says where the audio will go
 
 
-def test_an_already_saved_project_is_left_alone(tmp_path):
+def test_an_already_saved_project_is_never_prompted(tmp_path):
     backend = _Reaper(saved=r"C:\Songs\Song.rpp")
 
-    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", str(tmp_path / "x.rpp"))
+    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", True)
 
-    assert backend.asked_to_save is None
+    assert not backend.was_prompted
 
 
-def test_without_the_flag_it_suggests_a_path_rather_than_choosing_one(tmp_path, capsys):
-    """A command line can't interrupt a scripted run to ask, so it must
-    not decide where someone's project lives."""
+def test_without_the_flag_nothing_is_opened_but_the_cost_is_stated(tmp_path, capsys):
+    """A command line can't interrupt a scripted run with a modal dialog
+    in someone's DAW, so it must not raise one uninvited."""
     backend = _Reaper()
 
-    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", None)
+    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", False)
 
     out = capsys.readouterr().out
-    assert backend.asked_to_save is None
-    assert "--save-project-as" in out
-    assert "Shady Grove" in out  # the suggestion is named after the project
+    assert not backend.was_prompted
+    assert "play from the shared folder" in out
+    assert "--save-project" in out
 
 
-def test_a_refused_save_warns_instead_of_stopping_the_pull(tmp_path, capsys):
+def test_a_cancelled_save_warns_instead_of_stopping_the_pull(tmp_path, capsys):
     backend = _Reaper(fail=True)
 
-    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", str(tmp_path / "Song.rpp"))
+    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", True)
 
     assert "[dawbridge][warning]" in capsys.readouterr().out
 
 
-def test_pro_tools_is_never_asked_to_save(tmp_path, capsys):
+def test_pro_tools_is_never_prompted(tmp_path, capsys):
     """A Pro Tools session cannot exist unsaved, so the probe is for the
     capability rather than for which DAW is selected."""
-    _save_project_if_asked(_ProTools(), tmp_path / "Shady Grove.dawbridge", str(tmp_path / "x"))
+    _save_project_if_asked(_ProTools(), tmp_path / "Shady Grove.dawbridge", True)
 
     assert capsys.readouterr().out == ""
 
 
-def test_the_suggested_name_comes_from_the_shared_folder(tmp_path):
-    """Same source the Discord notifications use, so one project reads
-    with one name everywhere."""
-    suggested = localmedia.default_project_file("Shady Grove", projects_dir=tmp_path)
-    assert suggested.name == "Shady Grove.rpp"
+def test_the_media_home_reported_follows_where_reaper_actually_put_it(tmp_path, capsys):
+    """The whole reason the old flow was wrong: DAWBridge asked for a
+    path, Reaper ignored it, and the audio went somewhere else. What is
+    reported must come from where the project LANDED."""
+    backend = _Reaper(lands=r"D:\Elsewhere\Different Name.rpp")
+
+    _save_project_if_asked(backend, tmp_path / "Shady Grove.dawbridge", True)
+
+    assert r"D:\Elsewhere\Audio Files" in capsys.readouterr().out
