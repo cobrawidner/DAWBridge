@@ -57,14 +57,10 @@ The buttons sit left to right in the order you use them.
    save it first; see below.
 3. **Run `DAWBridge.exe`.** There's nothing to install — it's one file.
 
-   **Reaper users, one extra step, once.** Reaper needs to be taught to talk
-   to DAWBridge. **Close Reaper**, press **Set up Reaper...**, then open
-   Reaper again. You don't need to download or install anything; DAWBridge
-   brings its own copy of Python for Reaper to use, and nothing already on
-   your machine is changed.
-
-   Reaper has to be *closed* while this runs. It rewrites its settings when
-   it quits, so doing it with Reaper open just undoes the setup.
+   **Reaper users, one extra step, once.** Reaper needs Python installed
+   before it can talk to DAWBridge — about five minutes, and you never do
+   it again. Follow **REAPER_SETUP.md**, which has the download link and
+   the two commands to run.
 
    **Pro Tools users:** nothing to do here.
 4. Click **Browse…** and select the shared folder — the one ending in
