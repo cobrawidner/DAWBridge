@@ -83,14 +83,60 @@ jobs:
         with:
           files: |
             dist/DAWBridge.exe
-            docs/QUICKSTART.md
+            docs/HANDBOOK.html
+            docs/HANDBOOK.md
+            docs/REAPER_SETUP.md
           body: |
             Download **DAWBridge.exe** below and run it. No installation.
 
-            **First time?** Read QUICKSTART.md - it covers the one idea and
-            the two buttons, and what to do when DAWBridge warns you about
-            something.
+            **First time?** Read HANDBOOK.html - open it in any browser. It
+            covers the one idea, every button, and what to do when DAWBridge
+            warns you about something.
+
+            **Using Reaper?** REAPER_SETUP.md has the one-time Python install.
+            Pro Tools needs nothing.
 
             Built from this tag by GitHub Actions, with the full test suite
             green.
           generate_release_notes: true
+
+      # Announce it in Discord. The URL is a SECRET, never a literal:
+      # anyone holding it can post to that channel, and a webhook written
+      # into a workflow file is in git history permanently and readable
+      # by every collaborator. Set it under
+      # Settings > Secrets and variables > Actions > New repository secret,
+      # named DISCORD_RELEASE_WEBHOOK.
+      #
+      # Runs after the release exists so the link in the message works,
+      # and only for a tag - a workflow_dispatch build is not a release
+      # and should not tell anyone it is.
+      - name: Announce the release in Discord
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if (-not $env:WEBHOOK) {
+            Write-Host "No DISCORD_RELEASE_WEBHOOK secret is set - skipping the announcement."
+            Write-Host "The release itself published fine."
+            exit 0
+          }
+          $tag = "${{ github.ref_name }}"
+          $link = "https://github.com/${{ github.repository }}/releases/tag/$tag"
+          $text = "**DAWBridge $tag** is out. Download DAWBridge.exe from the release page, then run it - there is nothing to install.`n$link"
+          # Assembled rather than ConvertTo-Json'd whole, so allowed_mentions
+          # is guaranteed to serialise as [] - PowerShell turns an empty
+          # array into an empty string, and Discord would then treat the
+          # message as pingable. A release note that @everyone's a server
+          # gets the integration switched off within a day.
+          $payload = '{"content":' + ($text | ConvertTo-Json) +
+                     ',"username":"DAWBridge","allowed_mentions":{"parse":[]}}'
+          try {
+            Invoke-RestMethod -Uri $env:WEBHOOK -Method Post `
+              -ContentType 'application/json; charset=utf-8' `
+              -Body ([System.Text.Encoding]::UTF8.GetBytes($payload))
+            Write-Host "Told Discord about $tag."
+          } catch {
+            # A courtesy must never fail a release that already published.
+            Write-Host "::warning::Could not post to Discord: $($_.Exception.Message)"
+          }
