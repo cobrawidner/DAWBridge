@@ -204,11 +204,17 @@ ol.steps { list-style: none; counter-reset: s; margin: 1.4rem 0; padding: 0; dis
 ol.steps > li { counter-increment: s; display: grid; grid-template-columns: 2rem 1fr; gap: 0 1rem; }
 ol.steps > li::before {
   content: counter(s);
+  grid-column: 1; grid-row: 1;
   font-family: var(--sans); font-weight: 700; font-size: .95rem;
   color: var(--accent);
   border-top: 2px solid var(--accent);
   padding-top: .35rem;
 }
+/* Every child goes in column 2. Without this, each <p> is its own grid
+   item and auto-placement drops the SECOND one into the 2rem number
+   column - which renders one word per line and collides with the number
+   below it. */
+ol.steps > li > * { grid-column: 2; }
 ol.steps > li > *:first-child { margin-top: .1rem; }
 ol.steps p:last-child { margin-bottom: 0; }
 
