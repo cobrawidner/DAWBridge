@@ -43,23 +43,20 @@ preference, and preferences belong in conversation, not on a list.
 
 ### Blocking
 
-- **Add the collaborators under Settings > Collaborators.** The repo is
-  private, so a release download 404s for anyone not on that list. This
-  is now the *only* thing standing between the project and being used by
-  everyone - and it matters more than it did, because the release page is
-  where HANDBOOK.html and REAPER_SETUP.md live.
+**Nothing.** Both long-standing items are resolved.
 
-*Releasing is no longer a blocking item.* Tagging is the whole process:
-`git tag -a v0.1.7 -m "..." && git push origin v0.1.7` runs the tests,
-builds the exe with the bundled runtime, checks the runtime really got
-bundled, publishes a release carrying DAWBridge.exe + HANDBOOK.html +
-HANDBOOK.md + REAPER_SETUP.md, and posts a changelog to Discord built
-from the commit subjects since the previous tag. Verified end to end on
-v0.1.6, 2026-09-06: the announcement landed.
+- *Releasing* stopped being manual: tagging runs the tests, builds the
+  exe, publishes a release carrying DAWBridge.exe + the handbook +
+  REAPER_SETUP.md, and posts a changelog to Discord. Verified end to end
+  on v0.1.6.
+- *Getting builds to people* stopped needing an invite list. The repo
+  went public on 2026-09-07, so release downloads work for anyone with
+  the link - no collaborator management at all. History was checked for
+  secrets first: the only Discord URLs ever committed are test fixtures
+  (`webhooks/1/abc`), notify.json was never tracked, no tokens.
 
-*Current release: v0.1.6.* Reaper collaborators install Python once -
-docs/REAPER_SETUP.md. The bundled-Python route stays parked and
-refusing-by-default; see Queued.
+The handbook is a live page: https://cobrawidner.github.io/DAWBridge/
+Served by GitHub Pages from `docs/` on main, so it updates on push.
 
 ### Proposed - awaiting triage
 

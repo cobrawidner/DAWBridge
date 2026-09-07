@@ -3,6 +3,8 @@
 How to work on the same song as everyone else, without anyone losing a take.
 Read it once and you're set.
 
+**Nicer to read on the web:** https://cobrawidner.github.io/DAWBridge/
+
 ---
 
 ## What this is

@@ -1,5 +1,9 @@
 # DAWBridge (Phase 1)
 
+**[Read the handbook](https://cobrawidner.github.io/DAWBridge/)** — everything you need to use this, in about ten minutes. Reaper users also need the [one-time Python setup](docs/REAPER_SETUP.md).
+
+**[Download the latest build](https://github.com/cobrawidner/DAWBridge/releases/latest)** — one file, nothing to install.
+
 Shared-folder session bridge between Reaper and Pro Tools, for two people in
 different locations who each prefer a different DAW. See the
 `DAWBridge_Feasibility.md` write-up shared alongside this project for the
