@@ -43,17 +43,23 @@ preference, and preferences belong in conversation, not on a list.
 
 ### Blocking
 
-Two small things only Travis can do, both on GitHub rather than in code:
-
-- **Tag a release when the collaborators should move builds.**
-  `git tag v0.1.3 && git push origin v0.1.3`. `v0.1.2` predates track
-  colours, the specific DAW-unavailable messages and the notification
-  wording. Nothing is broken in v0.1.2; it is just behind.
 - **Add the collaborators under Settings > Collaborators.** The repo is
   private, so a release download 404s for anyone not on that list. This
-  is the last thing standing between the project and being used by
-  everyone.
+  is now the *only* thing standing between the project and being used by
+  everyone - and it matters more than it did, because the release page is
+  where HANDBOOK.html and REAPER_SETUP.md live.
 
+*Releasing is no longer a blocking item.* Tagging is the whole process:
+`git tag -a v0.1.7 -m "..." && git push origin v0.1.7` runs the tests,
+builds the exe with the bundled runtime, checks the runtime really got
+bundled, publishes a release carrying DAWBridge.exe + HANDBOOK.html +
+HANDBOOK.md + REAPER_SETUP.md, and posts a changelog to Discord built
+from the commit subjects since the previous tag. Verified end to end on
+v0.1.6, 2026-09-06: the announcement landed.
+
+*Current release: v0.1.6.* Reaper collaborators install Python once -
+docs/REAPER_SETUP.md. The bundled-Python route stays parked and
+refusing-by-default; see Queued.
 
 ### Proposed - awaiting triage
 
